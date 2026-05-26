@@ -329,11 +329,11 @@ func (l *ModelLoader) updateDatabase(ctx context.Context) error {
 					}
 				}
 
-			for _, handler := range l.handlers {
-				if err := handler(ctx, record); err != nil {
-					glog.Errorf("%s: event handler error: %v", *attr.Name, err)
+				for _, handler := range l.handlers {
+					if err := handler(ctx, record); err != nil {
+						glog.Errorf("%s: event handler error: %v", *attr.Name, err)
+					}
 				}
-			}
 			}()
 		}
 	}()

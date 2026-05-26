@@ -31,18 +31,18 @@ func TestYamlModelToModelProviderRecord(t *testing.T) {
 			name: "complete model with all properties",
 			yamlModel: yamlModel{
 				CatalogModel: model.CatalogModel{
-					Name:                     "test-model",
-					Description:              apiutils.Of("Test model description"),
-					Readme:                   apiutils.Of("# Test Model\nThis is a test model."),
-					Maturity:                 apiutils.Of("Generally Available"),
-					Language:                 []string{"en", "fr"},
-					Tasks:                    []string{"text-generation", "nlp"},
-					ValidatedTasks:           []string{"text-generation", "tool-calling"},
-					Provider:                 apiutils.Of("IBM"),
-					Logo:                     apiutils.Of("https://example.com/logo.png"),
-					License:                  apiutils.Of("apache-2.0"),
-					LicenseLink:              apiutils.Of("https://www.apache.org/licenses/LICENSE-2.0"),
-					LibraryName:              apiutils.Of("transformers"),
+					Name:           "test-model",
+					Description:    apiutils.Of("Test model description"),
+					Readme:         apiutils.Of("# Test Model\nThis is a test model."),
+					Maturity:       apiutils.Of("Generally Available"),
+					Language:       []string{"en", "fr"},
+					Tasks:          []string{"text-generation", "nlp"},
+					ValidatedTasks: []string{"text-generation", "tool-calling"},
+					Provider:       apiutils.Of("IBM"),
+					Logo:           apiutils.Of("https://example.com/logo.png"),
+					License:        apiutils.Of("apache-2.0"),
+					LicenseLink:    apiutils.Of("https://www.apache.org/licenses/LICENSE-2.0"),
+					LibraryName:    apiutils.Of("transformers"),
 					ServingConfig: &model.ServingConfig{
 						ToolCalling: &model.ToolCallingConfig{
 							ToolCallParser:       apiutils.Of("granite"),
@@ -905,4 +905,110 @@ func modelNameFromRecord(t *testing.T, record ModelProviderRecord) string {
 	require.NotNil(t, attrs)
 	require.NotNil(t, attrs.Name)
 	return *attrs.Name
+}
+
+func TestExtractHardwareTagsFromYAML(t *testing.T) {
+	t.Run("extracts unique hardware_tag values from validated models", func(t *testing.T) {
+		path := filepath.Join("testdata", "dev-validated-models.yaml")
+		tags, err := extractHardwareTagsFromYAML(path)
+		require.NoError(t, err)
+		assert.Contains(t, tags, "Intel Xeon")
+	})
+
+	t.Run("returns empty for catalog without hardware_tag", func(t *testing.T) {
+		dir := t.TempDir()
+		catalogPath := filepath.Join(dir, "no-tags.yaml")
+		content := `source: test
+models:
+  - name: TestModel/no-tags
+    description: A model without hardware tags
+    tasks:
+      - text-generation
+    customProperties:
+      model_type:
+        metadataType: MetadataStringValue
+        string_value: "generative"
+    artifacts:
+      - uri: oci://registry.example.com/test:latest
+`
+		require.NoError(t, os.WriteFile(catalogPath, []byte(content), 0o644))
+
+		tags, err := extractHardwareTagsFromYAML(catalogPath)
+		require.NoError(t, err)
+		assert.Empty(t, tags)
+	})
+
+	t.Run("deduplicates identical hardware_tag values", func(t *testing.T) {
+		dir := t.TempDir()
+		catalogPath := filepath.Join(dir, "dup-tags.yaml")
+		content := `source: test
+models:
+  - name: TestModel/model-a
+    description: First model
+    tasks:
+      - text-generation
+    customProperties:
+      hardware_tag:
+        metadataType: MetadataStringValue
+        string_value: "HRDWR X3000"
+    artifacts:
+      - uri: oci://registry.example.com/a:latest
+  - name: TestModel/model-b
+    description: Second model
+    tasks:
+      - text-generation
+    customProperties:
+      hardware_tag:
+        metadataType: MetadataStringValue
+        string_value: "HRDWR X3000"
+    artifacts:
+      - uri: oci://registry.example.com/b:latest
+  - name: TestModel/model-c
+    description: Third model
+    tasks:
+      - text-generation
+    customProperties:
+      hardware_tag:
+        metadataType: MetadataStringValue
+        string_value: "HRDWR X2000"
+    artifacts:
+      - uri: oci://registry.example.com/c:latest
+`
+		require.NoError(t, os.WriteFile(catalogPath, []byte(content), 0o644))
+
+		tags, err := extractHardwareTagsFromYAML(catalogPath)
+		require.NoError(t, err)
+		assert.Len(t, tags, 2)
+		assert.Contains(t, tags, "HRDWR X3000")
+		assert.Contains(t, tags, "HRDWR X2000")
+	})
+
+	t.Run("skips empty hardware_tag values", func(t *testing.T) {
+		dir := t.TempDir()
+		catalogPath := filepath.Join(dir, "empty-tag.yaml")
+		content := `source: test
+models:
+  - name: TestModel/empty-tag
+    description: Model with empty tag
+    tasks:
+      - text-generation
+    customProperties:
+      hardware_tag:
+        metadataType: MetadataStringValue
+        string_value: ""
+    artifacts:
+      - uri: oci://registry.example.com/empty:latest
+`
+		require.NoError(t, os.WriteFile(catalogPath, []byte(content), 0o644))
+
+		tags, err := extractHardwareTagsFromYAML(catalogPath)
+		require.NoError(t, err)
+		assert.Empty(t, tags)
+	})
+
+	t.Run("returns error for nonexistent file", func(t *testing.T) {
+		tags, err := extractHardwareTagsFromYAML("/nonexistent/path.yaml")
+		assert.Error(t, err)
+		assert.Nil(t, tags)
+	})
 }
