@@ -68,7 +68,6 @@ func convertCustomProperties(customProps *map[string]apimodels.MetadataValue) []
 	return properties
 }
 
-
 func init() {
 	if err := RegisterModelProvider("yaml", newYamlModelProvider); err != nil {
 		panic(err)
