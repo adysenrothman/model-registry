@@ -820,6 +820,163 @@ func TestYamlModelProviderInvalidPattern(t *testing.T) {
 	assert.Contains(t, err.Error(), "pattern cannot be empty")
 }
 
+func TestYamlModelHardwareTagAsCustomProperty(t *testing.T) {
+	t.Run("single hardware_tag value", func(t *testing.T) {
+		ym := yamlModel{
+			CatalogModel: model.CatalogModel{
+				Name:  "test-vendor/single-hw",
+				Tasks: []string{"text-generation"},
+				CustomProperties: map[string]model.MetadataValue{
+					"hardware_tag": {
+						MetadataStringValue: &model.MetadataStringValue{
+							StringValue:  "Hardware Tag 1",
+							MetadataType: "MetadataStringValue",
+						},
+					},
+				},
+			},
+			Artifacts: []*yamlArtifact{
+				{CatalogArtifact: model.CatalogArtifact{
+					CatalogModelArtifact: &model.CatalogModelArtifact{
+						ArtifactType: "model-artifact",
+						Uri:          "oci://registry.example.com/test:latest",
+					},
+				}},
+			},
+		}
+
+		record := ym.ToModelProviderRecord()
+		require.NotNil(t, record.Model)
+		require.Nil(t, record.Error)
+
+		customPropMap := customPropsToMap(t, record)
+		assert.Contains(t, customPropMap, "hardware_tag")
+		assert.Equal(t, "Hardware Tag 1", *customPropMap["hardware_tag"].StringValue)
+		assert.True(t, customPropMap["hardware_tag"].IsCustomProperty)
+	})
+
+	t.Run("multiple hardware_tag values comma-separated", func(t *testing.T) {
+		ym := yamlModel{
+			CatalogModel: model.CatalogModel{
+				Name:  "test-vendor/multi-hw",
+				Tasks: []string{"text-generation"},
+				CustomProperties: map[string]model.MetadataValue{
+					"hardware_tag": {
+						MetadataStringValue: &model.MetadataStringValue{
+							StringValue:  "Hardware Tag 1,Hardware Tag 2",
+							MetadataType: "MetadataStringValue",
+						},
+					},
+				},
+			},
+			Artifacts: []*yamlArtifact{
+				{CatalogArtifact: model.CatalogArtifact{
+					CatalogModelArtifact: &model.CatalogModelArtifact{
+						ArtifactType: "model-artifact",
+						Uri:          "oci://registry.example.com/test:latest",
+					},
+				}},
+			},
+		}
+
+		record := ym.ToModelProviderRecord()
+		require.NotNil(t, record.Model)
+		require.Nil(t, record.Error)
+
+		customPropMap := customPropsToMap(t, record)
+		assert.Contains(t, customPropMap, "hardware_tag")
+		assert.Equal(t, "Hardware Tag 1,Hardware Tag 2", *customPropMap["hardware_tag"].StringValue)
+		assert.True(t, customPropMap["hardware_tag"].IsCustomProperty)
+	})
+
+	t.Run("empty hardware_tag produces no custom property", func(t *testing.T) {
+		ym := yamlModel{
+			CatalogModel: model.CatalogModel{
+				Name:  "test-vendor/empty-hw",
+				Tasks: []string{"text-generation"},
+				CustomProperties: map[string]model.MetadataValue{
+					"hardware_tag": {
+						MetadataStringValue: &model.MetadataStringValue{
+							StringValue:  "",
+							MetadataType: "MetadataStringValue",
+						},
+					},
+					"model_type": {
+						MetadataStringValue: &model.MetadataStringValue{
+							StringValue:  "predictive",
+							MetadataType: "MetadataStringValue",
+						},
+					},
+				},
+			},
+			Artifacts: []*yamlArtifact{
+				{CatalogArtifact: model.CatalogArtifact{
+					CatalogModelArtifact: &model.CatalogModelArtifact{
+						ArtifactType: "model-artifact",
+						Uri:          "oci://registry.example.com/test:latest",
+					},
+				}},
+			},
+		}
+
+		record := ym.ToModelProviderRecord()
+		require.NotNil(t, record.Model)
+		require.Nil(t, record.Error)
+
+		customPropMap := customPropsToMap(t, record)
+		assert.NotContains(t, customPropMap, "hardware_tag")
+		assert.Contains(t, customPropMap, "model_type")
+		assert.Equal(t, "predictive", *customPropMap["model_type"].StringValue)
+	})
+
+	t.Run("missing hardware_tag produces no custom property", func(t *testing.T) {
+		ym := yamlModel{
+			CatalogModel: model.CatalogModel{
+				Name:  "test-vendor/no-hw",
+				Tasks: []string{"text-generation"},
+				CustomProperties: map[string]model.MetadataValue{
+					"model_type": {
+						MetadataStringValue: &model.MetadataStringValue{
+							StringValue:  "generative",
+							MetadataType: "MetadataStringValue",
+						},
+					},
+				},
+			},
+			Artifacts: []*yamlArtifact{
+				{CatalogArtifact: model.CatalogArtifact{
+					CatalogModelArtifact: &model.CatalogModelArtifact{
+						ArtifactType: "model-artifact",
+						Uri:          "oci://registry.example.com/test:latest",
+					},
+				}},
+			},
+		}
+
+		record := ym.ToModelProviderRecord()
+		require.NotNil(t, record.Model)
+		require.Nil(t, record.Error)
+
+		customPropMap := customPropsToMap(t, record)
+		assert.NotContains(t, customPropMap, "hardware_tag")
+		assert.Contains(t, customPropMap, "model_type")
+		assert.Equal(t, "generative", *customPropMap["model_type"].StringValue)
+	})
+}
+
+func customPropsToMap(t *testing.T, record ModelProviderRecord) map[string]models.Properties {
+	t.Helper()
+	customProps := record.Model.GetCustomProperties()
+	m := make(map[string]models.Properties)
+	if customProps == nil {
+		return m
+	}
+	for _, prop := range *customProps {
+		m[prop.Name] = prop
+	}
+	return m
+}
+
 func writeMiniCatalog(t *testing.T, modelNames []string) string {
 	t.Helper()
 
@@ -905,110 +1062,4 @@ func modelNameFromRecord(t *testing.T, record ModelProviderRecord) string {
 	require.NotNil(t, attrs)
 	require.NotNil(t, attrs.Name)
 	return *attrs.Name
-}
-
-func TestExtractHardwareTagsFromYAML(t *testing.T) {
-	t.Run("extracts unique hardware_tag values from validated models", func(t *testing.T) {
-		path := filepath.Join("testdata", "dev-validated-models.yaml")
-		tags, err := extractHardwareTagsFromYAML(path)
-		require.NoError(t, err)
-		assert.Contains(t, tags, "Intel Xeon")
-	})
-
-	t.Run("returns empty for catalog without hardware_tag", func(t *testing.T) {
-		dir := t.TempDir()
-		catalogPath := filepath.Join(dir, "no-tags.yaml")
-		content := `source: test
-models:
-  - name: TestModel/no-tags
-    description: A model without hardware tags
-    tasks:
-      - text-generation
-    customProperties:
-      model_type:
-        metadataType: MetadataStringValue
-        string_value: "generative"
-    artifacts:
-      - uri: oci://registry.example.com/test:latest
-`
-		require.NoError(t, os.WriteFile(catalogPath, []byte(content), 0o644))
-
-		tags, err := extractHardwareTagsFromYAML(catalogPath)
-		require.NoError(t, err)
-		assert.Empty(t, tags)
-	})
-
-	t.Run("deduplicates identical hardware_tag values", func(t *testing.T) {
-		dir := t.TempDir()
-		catalogPath := filepath.Join(dir, "dup-tags.yaml")
-		content := `source: test
-models:
-  - name: TestModel/model-a
-    description: First model
-    tasks:
-      - text-generation
-    customProperties:
-      hardware_tag:
-        metadataType: MetadataStringValue
-        string_value: "HRDWR X3000"
-    artifacts:
-      - uri: oci://registry.example.com/a:latest
-  - name: TestModel/model-b
-    description: Second model
-    tasks:
-      - text-generation
-    customProperties:
-      hardware_tag:
-        metadataType: MetadataStringValue
-        string_value: "HRDWR X3000"
-    artifacts:
-      - uri: oci://registry.example.com/b:latest
-  - name: TestModel/model-c
-    description: Third model
-    tasks:
-      - text-generation
-    customProperties:
-      hardware_tag:
-        metadataType: MetadataStringValue
-        string_value: "HRDWR X2000"
-    artifacts:
-      - uri: oci://registry.example.com/c:latest
-`
-		require.NoError(t, os.WriteFile(catalogPath, []byte(content), 0o644))
-
-		tags, err := extractHardwareTagsFromYAML(catalogPath)
-		require.NoError(t, err)
-		assert.Len(t, tags, 2)
-		assert.Contains(t, tags, "HRDWR X3000")
-		assert.Contains(t, tags, "HRDWR X2000")
-	})
-
-	t.Run("skips empty hardware_tag values", func(t *testing.T) {
-		dir := t.TempDir()
-		catalogPath := filepath.Join(dir, "empty-tag.yaml")
-		content := `source: test
-models:
-  - name: TestModel/empty-tag
-    description: Model with empty tag
-    tasks:
-      - text-generation
-    customProperties:
-      hardware_tag:
-        metadataType: MetadataStringValue
-        string_value: ""
-    artifacts:
-      - uri: oci://registry.example.com/empty:latest
-`
-		require.NoError(t, os.WriteFile(catalogPath, []byte(content), 0o644))
-
-		tags, err := extractHardwareTagsFromYAML(catalogPath)
-		require.NoError(t, err)
-		assert.Empty(t, tags)
-	})
-
-	t.Run("returns error for nonexistent file", func(t *testing.T) {
-		tags, err := extractHardwareTagsFromYAML("/nonexistent/path.yaml")
-		assert.Error(t, err)
-		assert.Nil(t, tags)
-	})
 }

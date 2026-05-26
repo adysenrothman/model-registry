@@ -51,7 +51,8 @@ func convertMetadataValueToProperty(key string, value apimodels.MetadataValue) m
 	}
 }
 
-// convertCustomProperties converts a map of custom properties to a slice of Properties
+// convertCustomProperties converts a map of custom properties to a slice of Properties.
+// hardware_tag entries with empty values are skipped.
 func convertCustomProperties(customProps *map[string]apimodels.MetadataValue) []models.Properties {
 	if customProps == nil {
 		return nil
@@ -59,42 +60,14 @@ func convertCustomProperties(customProps *map[string]apimodels.MetadataValue) []
 
 	var properties []models.Properties
 	for key, value := range *customProps {
+		if key == "hardware_tag" && value.MetadataStringValue != nil && value.MetadataStringValue.StringValue == "" {
+			continue
+		}
 		properties = append(properties, convertMetadataValueToProperty(key, value))
 	}
 	return properties
 }
 
-const hardwareTagKey = "hardware_tag"
-
-// extractHardwareTagsFromYAML reads a YAML catalog file and returns unique
-// hardware_tag values found in model customProperties.
-func extractHardwareTagsFromYAML(path string) ([]string, error) {
-	buf, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	var catalog yamlCatalog
-	if err = yaml.UnmarshalStrict(buf, &catalog); err != nil {
-		return nil, err
-	}
-
-	seen := make(map[string]struct{})
-	var tags []string
-	for _, model := range catalog.Models {
-		if val, ok := model.CustomProperties[hardwareTagKey]; ok && val.MetadataStringValue != nil {
-			tag := val.MetadataStringValue.StringValue
-			if tag != "" {
-				if _, exists := seen[tag]; !exists {
-					seen[tag] = struct{}{}
-					tags = append(tags, tag)
-				}
-			}
-		}
-	}
-
-	return tags, nil
-}
 
 func init() {
 	if err := RegisterModelProvider("yaml", newYamlModelProvider); err != nil {
