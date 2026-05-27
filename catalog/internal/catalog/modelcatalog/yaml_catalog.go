@@ -51,8 +51,7 @@ func convertMetadataValueToProperty(key string, value apimodels.MetadataValue) m
 	}
 }
 
-// convertCustomProperties converts a map of custom properties to a slice of Properties.
-// hardware_tag entries with empty values are skipped.
+// convertCustomProperties converts a map of custom properties to a slice of Properties
 func convertCustomProperties(customProps *map[string]apimodels.MetadataValue) []models.Properties {
 	if customProps == nil {
 		return nil
@@ -60,9 +59,6 @@ func convertCustomProperties(customProps *map[string]apimodels.MetadataValue) []
 
 	var properties []models.Properties
 	for key, value := range *customProps {
-		if key == "hardware_tag" && value.MetadataStringValue != nil && value.MetadataStringValue.StringValue == "" {
-			continue
-		}
 		properties = append(properties, convertMetadataValueToProperty(key, value))
 	}
 	return properties
@@ -166,6 +162,12 @@ func (ym *yamlModel) convertModelProperties() ([]models.Properties, []models.Pro
 		if servingConfigJSON, err := json.Marshal(ym.ServingConfig); err == nil {
 			properties = append(properties, models.NewStringProperty("serving_config", string(servingConfigJSON), false))
 		}
+	}
+
+	// Drop hardware_tag if its value is empty
+	if val, ok := ym.CustomProperties["hardware_tag"]; ok &&
+		val.MetadataStringValue != nil && val.MetadataStringValue.StringValue == "" {
+		delete(ym.CustomProperties, "hardware_tag")
 	}
 
 	// Convert custom properties from the YAML model
