@@ -52,7 +52,7 @@ export const getValueLabels = (
 ): string[] =>
   keys.flatMap((key) => {
     const prop = customProperties[key];
-    if (prop && prop.metadataType === ModelRegistryMetadataType.STRING && prop.string_value) {
+    if (prop.metadataType === ModelRegistryMetadataType.STRING && prop.string_value) {
       return [prop.string_value];
     }
     return [];
