@@ -50,13 +50,15 @@ export const getValueLabels = (
   customProperties: ModelRegistryCustomProperties,
   keys: string[],
 ): string[] =>
-  keys.flatMap((key) => {
-    const prop = customProperties[key];
-    if (prop.metadataType === ModelRegistryMetadataType.STRING && prop.string_value) {
-      return [prop.string_value];
-    }
-    return [];
-  });
+  keys
+    .filter((key) => key in customProperties)
+    .flatMap((key) => {
+      const prop = customProperties[key];
+      if (prop.metadataType === ModelRegistryMetadataType.STRING && prop.string_value) {
+        return [prop.string_value];
+      }
+      return [];
+    });
 
 // Returns the customProperties object with an updated set of labels (non-empty string_value) without affecting other properties.
 export const mergeUpdatedLabels = (
