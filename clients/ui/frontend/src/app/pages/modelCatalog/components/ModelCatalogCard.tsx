@@ -88,10 +88,7 @@ const ModelCatalogCard: React.FC<ModelCatalogCardProps> = ({ model, source }) =>
           tasks={model.tasks ?? []}
           validatedTasks={model.validatedTasks}
           provider={model.provider}
-          labels={[
-            ...allLabels.filter((label) => label !== 'validated'),
-            ...valueLabels,
-          ]}
+          labels={[...allLabels.filter((label) => label !== 'validated'), ...valueLabels]}
           numLabels={isValidated ? 2 : 3}
         />
       </CardFooter>
