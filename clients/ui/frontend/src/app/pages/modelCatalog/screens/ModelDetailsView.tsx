@@ -50,7 +50,10 @@ import {
   getModelSizeFromCustomProperties,
   getMinimumVramFromCustomProperties,
 } from '~/app/pages/modelCatalog/utils/modelCatalogUtils';
-import { CatalogModelCustomPropertyKey, CATALOG_VALUE_LABEL_KEYS } from '~/concepts/modelCatalog/const';
+import {
+  CatalogModelCustomPropertyKey,
+  CATALOG_VALUE_LABEL_KEYS,
+} from '~/concepts/modelCatalog/const';
 import CodeBlockComponent from '~/app/shared/markdown/components/CodeBlockComponent';
 
 type ModelDetailsViewProps = {
@@ -239,7 +242,10 @@ const ModelDetailsView: React.FC<ModelDetailsViewProps> = ({
                         <ModelCatalogLabels
                           tasks={model.tasks ?? []}
                           validatedTasks={model.validatedTasks}
-                          labels={[...allLabels.filter((label) => label !== 'validated'), ...valueLabels]}
+                          labels={[
+                            ...allLabels.filter((label) => label !== 'validated'),
+                            ...valueLabels,
+                          ]}
                           numLabels={isValidated ? 2 : 3}
                         />
                       </DescriptionListDescription>
