@@ -276,7 +276,7 @@ export enum CatalogModelCustomPropertyKey {
 }
 
 // Custom property keys whose values (not keys) should be displayed as card labels.
-export const CATALOG_VALUE_LABEL_KEYS: string[] = [CatalogModelCustomPropertyKey.HARDWARE_TAG];
+export const CATALOG_VALUE_LABEL_KEYS: CatalogModelCustomPropertyKey[] = [CatalogModelCustomPropertyKey.HARDWARE_TAG];
 
 export enum ModelType {
   GENERATIVE = 'generative',
