@@ -21,11 +21,21 @@ import (
 // metadataJSON represents the minimal structure needed from metadata.json files
 // Only the ID field is needed to look up existing models
 type metadataJSON struct {
-	ID              string   `json:"id"`               // Maps to model name for lookup
-	OverallAccuracy *float64 `json:"overall_accuracy"` // Overall accuracy score for the model
-	Size            *string  `json:"size"`             // Model parameter count (e.g., "8B params")
-	TensorType      *string  `json:"tensor_type"`      // Data precision (e.g., "FP16", "INT4")
-	VariantGroupID  *string  `json:"variant_group_id"` // UUID linking model variants together
+	ID                     string           `json:"id"`                        // Maps to model name for lookup
+	OverallAccuracy        *float64         `json:"overall_accuracy"`          // Overall accuracy score for the model
+	Size                   *string          `json:"size"`                      // Model parameter count (e.g., "8B params")
+	TensorType             *string          `json:"tensor_type"`               // Data precision (e.g., "FP16", "INT4")
+	VariantGroupID         *string          `json:"variant_group_id"`          // UUID linking model variants together
+	MinVRAMGB              *string          `json:"min_vram_gb"`               // Minimum VRAM required (e.g., "265 GB")
+	ModelcarImageSize      *string          `json:"modelcar_image_size"`       // Human-readable image size (e.g., "230.17 GB")
+	ModelcarImageSizeBytes *int64           `json:"modelcar_image_size_bytes"` // Image size in bytes
+	ColdStartMatrix        []coldStartEntry `json:"cold_start_matrix"`         // Cold start times per GPU configuration
+}
+
+type coldStartEntry struct {
+	GPUType                    string `json:"gpu_type"`
+	GPUCount                   string `json:"gpu_count"`
+	ColdStartTimeToLoadSeconds string `json:"cold_start_time_to_load_seconds"`
 }
 
 // parseMetadataJSON parses JSON data into metadataJSON struct, extracting only the ID field
@@ -681,6 +691,28 @@ func enrichCatalogModelFromMetadata(existingModel dbmodels.CatalogModel, metadat
 			StringValue:      metadata.VariantGroupID,
 			IsCustomProperty: true,
 		})
+	}
+
+	if metadata.MinVRAMGB != nil && *metadata.MinVRAMGB != "" {
+		customProperties = append(customProperties, models.Properties{
+			Name:             "min_vram_gb",
+			StringValue:      metadata.MinVRAMGB,
+			IsCustomProperty: true,
+		})
+	}
+
+	if len(metadata.ColdStartMatrix) > 0 {
+		csJSON, err := json.Marshal(metadata.ColdStartMatrix)
+		if err == nil {
+			s := string(csJSON)
+			customProperties = append(customProperties, models.Properties{
+				Name:             "cold_start_matrix",
+				StringValue:      &s,
+				IsCustomProperty: true,
+			})
+		} else {
+			glog.Warningf("Failed to marshal cold_start_matrix for model %s: %v", metadata.ID, err)
+		}
 	}
 
 	if len(customProperties) == 0 {

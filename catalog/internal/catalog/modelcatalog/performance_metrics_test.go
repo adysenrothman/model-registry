@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kubeflow/hub/catalog/internal/catalog/modelcatalog/models"
 )
 
 func TestParseMetadataJSON(t *testing.T) {
@@ -953,13 +955,17 @@ func TestUnmarshalJSON_EdgeCases(t *testing.T) {
 
 func TestParseMetadataJSON_NewFields(t *testing.T) {
 	tests := []struct {
-		name           string
-		jsonData       string
-		wantID         string
-		wantSize       *string
-		wantTensorType *string
-		wantVariantID  *string
-		wantErr        bool
+		name                       string
+		jsonData                   string
+		wantID                     string
+		wantSize                   *string
+		wantTensorType             *string
+		wantVariantID              *string
+		wantMinVRAMGB              *string
+		wantModelcarImageSize      *string
+		wantModelcarImageSizeBytes *int64
+		wantColdStartMatrix        []coldStartEntry
+		wantErr                    bool
 	}{
 		{
 			name: "complete metadata with all new fields",
@@ -1111,6 +1117,72 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 			wantVariantID:  &[]string{"stu901kl-2def-456s-tu90-123456789abc"}[0],
 			wantErr:        false,
 		},
+		{
+			name: "metadata with vRAM and cold-start matrix fields",
+			jsonData: `{
+				"id": "sample-model/test-405b-instruct",
+				"size": "405B params",
+				"tensor_type": "FP8",
+				"variant_group_id": "vwx234mn-5678-901v-wx23-456789abcdef",
+				"min_vram_gb": "265 GB",
+				"modelcar_image_size": "230.17 GB",
+				"modelcar_image_size_bytes": 230171650363,
+				"cold_start_matrix": [
+					{
+						"gpu_type": "A100-80",
+						"gpu_count": "4",
+						"cold_start_time_to_load_seconds": "587.3"
+					},
+					{
+						"gpu_type": "B200",
+						"gpu_count": "2",
+						"cold_start_time_to_load_seconds": "559.9"
+					}
+				]
+			}`,
+			wantID:                     "sample-model/test-405b-instruct",
+			wantSize:                   &[]string{"405B params"}[0],
+			wantTensorType:             &[]string{"FP8"}[0],
+			wantVariantID:              &[]string{"vwx234mn-5678-901v-wx23-456789abcdef"}[0],
+			wantMinVRAMGB:              &[]string{"265 GB"}[0],
+			wantModelcarImageSize:      &[]string{"230.17 GB"}[0],
+			wantModelcarImageSizeBytes: &[]int64{230171650363}[0],
+			wantColdStartMatrix: []coldStartEntry{
+				{GPUType: "A100-80", GPUCount: "4", ColdStartTimeToLoadSeconds: "587.3"},
+				{GPUType: "B200", GPUCount: "2", ColdStartTimeToLoadSeconds: "559.9"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "metadata with string-encoded cold-start matrix values",
+			jsonData: `{
+				"id": "RedHatAI/MiniMax-M2.5",
+				"size": "229B",
+				"tensor_type": "FP8",
+				"min_vram_gb": "265 GB",
+				"cold_start_matrix": [
+					{
+						"gpu_type": "A100-80",
+						"gpu_count": "4",
+						"cold_start_time_to_load_seconds": "587.3"
+					},
+					{
+						"gpu_type": "H200",
+						"gpu_count": "4",
+						"cold_start_time_to_load_seconds": "806.7"
+					}
+				]
+			}`,
+			wantID:         "RedHatAI/MiniMax-M2.5",
+			wantSize:       &[]string{"229B"}[0],
+			wantTensorType: &[]string{"FP8"}[0],
+			wantMinVRAMGB:  &[]string{"265 GB"}[0],
+			wantColdStartMatrix: []coldStartEntry{
+				{GPUType: "A100-80", GPUCount: "4", ColdStartTimeToLoadSeconds: "587.3"},
+				{GPUType: "H200", GPUCount: "4", ColdStartTimeToLoadSeconds: "806.7"},
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1144,6 +1216,33 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 			// Test VariantGroupID field
 			if (got.VariantGroupID == nil) != (tt.wantVariantID == nil) || (got.VariantGroupID != nil && tt.wantVariantID != nil && *got.VariantGroupID != *tt.wantVariantID) {
 				t.Errorf("parseMetadataJSON() VariantGroupID = %v, want %v", got.VariantGroupID, tt.wantVariantID)
+			}
+
+			// Test MinVRAMGB field
+			if (got.MinVRAMGB == nil) != (tt.wantMinVRAMGB == nil) || (got.MinVRAMGB != nil && tt.wantMinVRAMGB != nil && *got.MinVRAMGB != *tt.wantMinVRAMGB) {
+				t.Errorf("parseMetadataJSON() MinVRAMGB = %v, want %v", got.MinVRAMGB, tt.wantMinVRAMGB)
+			}
+
+			// Test ModelcarImageSize field
+			if (got.ModelcarImageSize == nil) != (tt.wantModelcarImageSize == nil) || (got.ModelcarImageSize != nil && tt.wantModelcarImageSize != nil && *got.ModelcarImageSize != *tt.wantModelcarImageSize) {
+				t.Errorf("parseMetadataJSON() ModelcarImageSize = %v, want %v", got.ModelcarImageSize, tt.wantModelcarImageSize)
+			}
+
+			// Test ModelcarImageSizeBytes field
+			if (got.ModelcarImageSizeBytes == nil) != (tt.wantModelcarImageSizeBytes == nil) || (got.ModelcarImageSizeBytes != nil && tt.wantModelcarImageSizeBytes != nil && *got.ModelcarImageSizeBytes != *tt.wantModelcarImageSizeBytes) {
+				t.Errorf("parseMetadataJSON() ModelcarImageSizeBytes = %v, want %v", got.ModelcarImageSizeBytes, tt.wantModelcarImageSizeBytes)
+			}
+
+			// Test ColdStartMatrix field
+			if len(got.ColdStartMatrix) != len(tt.wantColdStartMatrix) {
+				t.Errorf("parseMetadataJSON() ColdStartMatrix length = %d, want %d", len(got.ColdStartMatrix), len(tt.wantColdStartMatrix))
+			} else {
+				for i, entry := range got.ColdStartMatrix {
+					want := tt.wantColdStartMatrix[i]
+					if entry.GPUType != want.GPUType || entry.GPUCount != want.GPUCount || entry.ColdStartTimeToLoadSeconds != want.ColdStartTimeToLoadSeconds {
+						t.Errorf("parseMetadataJSON() ColdStartMatrix[%d] = %+v, want %+v", i, entry, want)
+					}
+				}
 			}
 		})
 	}
@@ -1376,6 +1475,63 @@ func TestBuildModelDirCache_CollisionWarning(t *testing.T) {
 	}
 	if cachedPath != dir2 {
 		t.Errorf("expected collision winner to be %s (last walked), got %s", dir2, cachedPath)
+	}
+}
+
+func TestEnrichCatalogModelFromMetadata_NewFields(t *testing.T) {
+	modelName := "test-vendor/test-405b-instruct"
+	modelID := int32(1)
+
+	existingModel := &models.CatalogModelImpl{
+		ID: &modelID,
+		Attributes: &models.CatalogModelAttributes{
+			Name: &modelName,
+		},
+	}
+
+	minVRAM := "80GB"
+	metadata := metadataJSON{
+		ID:        modelName,
+		MinVRAMGB: &minVRAM,
+		ColdStartMatrix: []coldStartEntry{
+			{GPUType: "A100", GPUCount: "2", ColdStartTimeToLoadSeconds: "127.3"},
+			{GPUType: "H100", GPUCount: "1", ColdStartTimeToLoadSeconds: "68.9"},
+		},
+	}
+
+	mockRepo := &mockPerfModelRepo{}
+
+	err := enrichCatalogModelFromMetadata(existingModel, metadata, mockRepo)
+	if err != nil {
+		t.Fatalf("enrichCatalogModelFromMetadata() error = %v", err)
+	}
+
+	props := existingModel.GetCustomProperties()
+	if props == nil {
+		t.Fatal("expected custom properties to be set, got nil")
+	}
+
+	propMap := make(map[string]string)
+	for _, p := range *props {
+		if p.StringValue != nil {
+			propMap[p.Name] = *p.StringValue
+		}
+	}
+
+	if v, ok := propMap["min_vram_gb"]; !ok {
+		t.Error("expected custom property 'min_vram_gb' to be set")
+	} else if v != "80GB" {
+		t.Errorf("min_vram_gb = %q, want %q", v, "80GB")
+	}
+
+	csJSON, ok := propMap["cold_start_matrix"]
+	if !ok {
+		t.Fatal("expected custom property 'cold_start_matrix' to be set")
+	}
+
+	wantJSON := `[{"gpu_type":"A100","gpu_count":"2","cold_start_time_to_load_seconds":"127.3"},{"gpu_type":"H100","gpu_count":"1","cold_start_time_to_load_seconds":"68.9"}]`
+	if csJSON != wantJSON {
+		t.Errorf("cold_start_matrix JSON mismatch\ngot:  %s\nwant: %s", csJSON, wantJSON)
 	}
 }
 
