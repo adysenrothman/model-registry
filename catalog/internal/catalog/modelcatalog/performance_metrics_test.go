@@ -962,10 +962,8 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 		wantSize                   *string
 		wantTensorType             *string
 		wantVariantID              *string
-		wantMinVRAMGB              *string
-		wantModelcarImageSize      *string
-		wantModelcarImageSizeBytes *int64
-		wantColdStartMatrix        []coldStartEntry
+		wantMinVRAMGB       *string
+		wantColdStartMatrix []coldStartEntry
 		wantErr                    bool
 	}{
 		{
@@ -1126,8 +1124,6 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 				"tensor_type": "FP8",
 				"variant_group_id": "vwx234mn-5678-901v-wx23-456789abcdef",
 				"min_vram_gb": "265 GB",
-				"modelcar_image_size": "230.17 GB",
-				"modelcar_image_size_bytes": 230171650363,
 				"cold_start_matrix": [
 					{
 						"gpu_type": "A100-80",
@@ -1145,9 +1141,7 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 			wantSize:                   &[]string{"405B params"}[0],
 			wantTensorType:             &[]string{"FP8"}[0],
 			wantVariantID:              &[]string{"vwx234mn-5678-901v-wx23-456789abcdef"}[0],
-			wantMinVRAMGB:              &[]string{"265 GB"}[0],
-			wantModelcarImageSize:      &[]string{"230.17 GB"}[0],
-			wantModelcarImageSizeBytes: &[]int64{230171650363}[0],
+			wantMinVRAMGB: &[]string{"265 GB"}[0],
 			wantColdStartMatrix: []coldStartEntry{
 				{GPUType: "A100-80", GPUCount: "4", ColdStartTimeToLoadSeconds: "587.3"},
 				{GPUType: "B200", GPUCount: "2", ColdStartTimeToLoadSeconds: "559.9"},
@@ -1155,7 +1149,7 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "metadata with string-encoded cold-start matrix values",
+			name: "metadata with runtime_command in cold-start matrix",
 			jsonData: `{
 				"id": "RedHatAI/MiniMax-M2.5",
 				"size": "229B",
@@ -1165,12 +1159,14 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 					{
 						"gpu_type": "A100-80",
 						"gpu_count": "4",
-						"cold_start_time_to_load_seconds": "587.3"
+						"cold_start_time_to_load_seconds": "587.3",
+						"runtime_command": "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --tensor-parallel-size 4"
 					},
 					{
 						"gpu_type": "H200",
 						"gpu_count": "4",
-						"cold_start_time_to_load_seconds": "806.7"
+						"cold_start_time_to_load_seconds": "806.7",
+						"runtime_command": "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --tensor-parallel-size 4"
 					}
 				]
 			}`,
@@ -1179,8 +1175,8 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 			wantTensorType: &[]string{"FP8"}[0],
 			wantMinVRAMGB:  &[]string{"265 GB"}[0],
 			wantColdStartMatrix: []coldStartEntry{
-				{GPUType: "A100-80", GPUCount: "4", ColdStartTimeToLoadSeconds: "587.3"},
-				{GPUType: "H200", GPUCount: "4", ColdStartTimeToLoadSeconds: "806.7"},
+				{GPUType: "A100-80", GPUCount: "4", ColdStartTimeToLoadSeconds: "587.3", RuntimeCommand: "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --tensor-parallel-size 4"},
+				{GPUType: "H200", GPUCount: "4", ColdStartTimeToLoadSeconds: "806.7", RuntimeCommand: "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --tensor-parallel-size 4"},
 			},
 			wantErr: false,
 		},
@@ -1222,16 +1218,6 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 			// Test MinVRAMGB field
 			if (got.MinVRAMGB == nil) != (tt.wantMinVRAMGB == nil) || (got.MinVRAMGB != nil && tt.wantMinVRAMGB != nil && *got.MinVRAMGB != *tt.wantMinVRAMGB) {
 				t.Errorf("parseMetadataJSON() MinVRAMGB = %v, want %v", got.MinVRAMGB, tt.wantMinVRAMGB)
-			}
-
-			// Test ModelcarImageSize field
-			if (got.ModelcarImageSize == nil) != (tt.wantModelcarImageSize == nil) || (got.ModelcarImageSize != nil && tt.wantModelcarImageSize != nil && *got.ModelcarImageSize != *tt.wantModelcarImageSize) {
-				t.Errorf("parseMetadataJSON() ModelcarImageSize = %v, want %v", got.ModelcarImageSize, tt.wantModelcarImageSize)
-			}
-
-			// Test ModelcarImageSizeBytes field
-			if (got.ModelcarImageSizeBytes == nil) != (tt.wantModelcarImageSizeBytes == nil) || (got.ModelcarImageSizeBytes != nil && tt.wantModelcarImageSizeBytes != nil && *got.ModelcarImageSizeBytes != *tt.wantModelcarImageSizeBytes) {
-				t.Errorf("parseMetadataJSON() ModelcarImageSizeBytes = %v, want %v", got.ModelcarImageSizeBytes, tt.wantModelcarImageSizeBytes)
 			}
 
 			// Test ColdStartMatrix field
@@ -1529,7 +1515,6 @@ func TestEnrichCatalogModelFromMetadata_NewFields(t *testing.T) {
 func TestCreateColdStartArtifact(t *testing.T) {
 	modelID := int32(42)
 	typeID := int32(7)
-	modelName := "RedHatAI/MiniMax-M2.5"
 
 	tests := []struct {
 		name           string
@@ -1547,6 +1532,7 @@ func TestCreateColdStartArtifact(t *testing.T) {
 				GPUType:                    "A100-80",
 				GPUCount:                   "4",
 				ColdStartTimeToLoadSeconds: "587.3",
+				RuntimeCommand:             "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --max-model-len -1 --tensor-parallel-size 4 --trust-remote-code",
 			},
 			wantGPUType:    "A100-80",
 			wantGPUCount:   "4",
@@ -1561,6 +1547,7 @@ func TestCreateColdStartArtifact(t *testing.T) {
 				GPUType:                    "H100",
 				GPUCount:                   "1",
 				ColdStartTimeToLoadSeconds: "68",
+				RuntimeCommand:             "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --max-model-len -1 --tensor-parallel-size 1 --trust-remote-code",
 			},
 			wantGPUType:    "H100",
 			wantGPUCount:   "1",
@@ -1575,6 +1562,7 @@ func TestCreateColdStartArtifact(t *testing.T) {
 				GPUType:                    "B200",
 				GPUCount:                   "2",
 				ColdStartTimeToLoadSeconds: "not-a-number",
+				RuntimeCommand:             "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --max-model-len -1 --tensor-parallel-size 2 --trust-remote-code",
 			},
 			wantGPUType:    "B200",
 			wantGPUCount:   "2",
@@ -1583,11 +1571,25 @@ func TestCreateColdStartArtifact(t *testing.T) {
 			wantArtName:    "cold-start-B200-2",
 			wantRuntimeCmd: "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --max-model-len -1 --tensor-parallel-size 2 --trust-remote-code",
 		},
+		{
+			name: "empty runtime_command omits property",
+			entry: coldStartEntry{
+				GPUType:                    "H200",
+				GPUCount:                   "4",
+				ColdStartTimeToLoadSeconds: "806.7",
+			},
+			wantGPUType:    "H200",
+			wantGPUCount:   "4",
+			wantSeconds:    new(float64(806.7)),
+			wantExtID:      "cold-start-42-H200-4",
+			wantArtName:    "cold-start-H200-4",
+			wantRuntimeCmd: "",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			artifact := createColdStartArtifact(tt.entry, modelID, typeID, modelName)
+			artifact := createColdStartArtifact(tt.entry, modelID, typeID)
 
 			if artifact == nil {
 				t.Fatal("expected non-nil artifact")
@@ -1638,8 +1640,14 @@ func TestCreateColdStartArtifact(t *testing.T) {
 			if propMap["gpu_count"] != tt.wantGPUCount {
 				t.Errorf("gpu_count = %v, want %q", propMap["gpu_count"], tt.wantGPUCount)
 			}
-			if propMap["runtime_command"] != tt.wantRuntimeCmd {
-				t.Errorf("runtime_command = %v, want %q", propMap["runtime_command"], tt.wantRuntimeCmd)
+			if tt.wantRuntimeCmd != "" {
+				if propMap["runtime_command"] != tt.wantRuntimeCmd {
+					t.Errorf("runtime_command = %v, want %q", propMap["runtime_command"], tt.wantRuntimeCmd)
+				}
+			} else {
+				if _, exists := propMap["runtime_command"]; exists {
+					t.Error("expected runtime_command to be absent when not provided")
+				}
 			}
 			if tt.wantSeconds != nil {
 				if propMap["cold_start_time_to_load_seconds"] != *tt.wantSeconds {

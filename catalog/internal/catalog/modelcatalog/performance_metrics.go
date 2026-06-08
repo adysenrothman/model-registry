@@ -22,21 +22,20 @@ import (
 // metadataJSON represents the minimal structure needed from metadata.json files
 // Only the ID field is needed to look up existing models
 type metadataJSON struct {
-	ID                     string           `json:"id"`                        // Maps to model name for lookup
-	OverallAccuracy        *float64         `json:"overall_accuracy"`          // Overall accuracy score for the model
-	Size                   *string          `json:"size"`                      // Model parameter count (e.g., "8B params")
-	TensorType             *string          `json:"tensor_type"`               // Data precision (e.g., "FP16", "INT4")
-	VariantGroupID         *string          `json:"variant_group_id"`          // UUID linking model variants together
-	MinVRAMGB              *string          `json:"min_vram_gb"`               // Minimum VRAM required (e.g., "265 GB")
-	ModelcarImageSize      *string          `json:"modelcar_image_size"`       // Human-readable image size (e.g., "230.17 GB")
-	ModelcarImageSizeBytes *int64           `json:"modelcar_image_size_bytes"` // Image size in bytes
-	ColdStartMatrix        []coldStartEntry `json:"cold_start_matrix"`         // Cold start times per GPU configuration
+	ID              string           `json:"id"`                // Maps to model name for lookup
+	OverallAccuracy *float64         `json:"overall_accuracy"`  // Overall accuracy score for the model
+	Size            *string          `json:"size"`              // Model parameter count (e.g., "8B params")
+	TensorType      *string          `json:"tensor_type"`       // Data precision (e.g., "FP16", "INT4")
+	VariantGroupID  *string          `json:"variant_group_id"`  // UUID linking model variants together
+	MinVRAMGB       *string          `json:"min_vram_gb"`       // Minimum VRAM required (e.g., "265 GB")
+	ColdStartMatrix []coldStartEntry `json:"cold_start_matrix"` // Cold start times per GPU configuration
 }
 
 type coldStartEntry struct {
 	GPUType                    string `json:"gpu_type"`
 	GPUCount                   string `json:"gpu_count"`
 	ColdStartTimeToLoadSeconds string `json:"cold_start_time_to_load_seconds"`
+	RuntimeCommand             string `json:"runtime_command"`
 }
 
 // parseMetadataJSON parses JSON data into metadataJSON struct, extracting only the ID field
@@ -407,7 +406,7 @@ func processModelArtifactsBatch(dirPath string, modelID int32, modelName string,
 	for _, csEntry := range coldStartMatrix {
 		externalID := fmt.Sprintf("cold-start-%d-%s-%s", modelID, csEntry.GPUType, csEntry.GPUCount)
 		if !existingArtifactsMap[externalID] {
-			artifact := createColdStartArtifact(csEntry, modelID, metricsArtifactTypeID, modelName)
+			artifact := createColdStartArtifact(csEntry, modelID, metricsArtifactTypeID)
 			artifactsToInsert = append(artifactsToInsert, artifact)
 		} else {
 			glog.V(2).Infof("Cold-start artifact %s already exists, skipping", externalID)
@@ -678,21 +677,22 @@ func createPerformanceArtifact(perfRecord performanceRecord, modelID int32, type
 
 // createColdStartArtifact creates a metrics artifact from a single cold-start matrix entry.
 // Each GPU configuration becomes its own artifact with discrete, filterable custom properties.
-func createColdStartArtifact(entry coldStartEntry, modelID int32, typeID int32, modelName string) *dbmodels.CatalogMetricsArtifactImpl {
+func createColdStartArtifact(entry coldStartEntry, modelID int32, typeID int32) *dbmodels.CatalogMetricsArtifactImpl {
 	externalID := fmt.Sprintf("cold-start-%d-%s-%s", modelID, entry.GPUType, entry.GPUCount)
 	artifactName := fmt.Sprintf("cold-start-%s-%s", entry.GPUType, entry.GPUCount)
 
 	now := time.Now().UnixMilli()
 
-	runtimeCommand := fmt.Sprintf(
-		"python3 -m vllm.entrypoints.openai.api_server --model %s --max-model-len -1 --tensor-parallel-size %s --trust-remote-code",
-		modelName, entry.GPUCount,
-	)
-
 	customProperties := []models.Properties{
 		{Name: "gpu_type", StringValue: &entry.GPUType},
 		{Name: "gpu_count", StringValue: &entry.GPUCount},
-		{Name: "runtime_command", StringValue: &runtimeCommand},
+	}
+
+	if entry.RuntimeCommand != "" {
+		customProperties = append(customProperties, models.Properties{
+			Name:        "runtime_command",
+			StringValue: &entry.RuntimeCommand,
+		})
 	}
 
 	if seconds, err := strconv.ParseFloat(entry.ColdStartTimeToLoadSeconds, 64); err == nil {
