@@ -1224,12 +1224,12 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 			if len(got.ColdStartMatrix) != len(tt.wantColdStartMatrix) {
 				t.Errorf("parseMetadataJSON() ColdStartMatrix length = %d, want %d", len(got.ColdStartMatrix), len(tt.wantColdStartMatrix))
 			} else {
-				for i, entry := range got.ColdStartMatrix {
-					want := tt.wantColdStartMatrix[i]
+			for i, entry := range got.ColdStartMatrix {
+				want := tt.wantColdStartMatrix[i]
 				if entry.GPUType != want.GPUType || entry.GPUCount != want.GPUCount || entry.ColdStartTimeToLoadSeconds != want.ColdStartTimeToLoadSeconds || entry.RuntimeCommand != want.RuntimeCommand {
 					t.Errorf("parseMetadataJSON() ColdStartMatrix[%d] = %+v, want %+v", i, entry, want)
 				}
-				}
+			}
 			}
 		})
 	}
