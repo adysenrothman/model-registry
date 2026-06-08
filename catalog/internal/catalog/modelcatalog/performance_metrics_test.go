@@ -956,15 +956,15 @@ func TestUnmarshalJSON_EdgeCases(t *testing.T) {
 
 func TestParseMetadataJSON_NewFields(t *testing.T) {
 	tests := []struct {
-		name                       string
-		jsonData                   string
-		wantID                     string
-		wantSize                   *string
-		wantTensorType             *string
-		wantVariantID              *string
+		name                string
+		jsonData            string
+		wantID              string
+		wantSize            *string
+		wantTensorType      *string
+		wantVariantID       *string
 		wantMinVRAMGB       *string
 		wantColdStartMatrix []coldStartEntry
-		wantErr                    bool
+		wantErr             bool
 	}{
 		{
 			name: "complete metadata with all new fields",
@@ -1137,11 +1137,11 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 					}
 				]
 			}`,
-			wantID:                     "sample-model/test-405b-instruct",
-			wantSize:                   &[]string{"405B params"}[0],
-			wantTensorType:             &[]string{"FP8"}[0],
-			wantVariantID:              &[]string{"vwx234mn-5678-901v-wx23-456789abcdef"}[0],
-			wantMinVRAMGB: &[]string{"265 GB"}[0],
+			wantID:         "sample-model/test-405b-instruct",
+			wantSize:       &[]string{"405B params"}[0],
+			wantTensorType: &[]string{"FP8"}[0],
+			wantVariantID:  &[]string{"vwx234mn-5678-901v-wx23-456789abcdef"}[0],
+			wantMinVRAMGB:  &[]string{"265 GB"}[0],
 			wantColdStartMatrix: []coldStartEntry{
 				{GPUType: "A100-80", GPUCount: "4", ColdStartTimeToLoadSeconds: "587.3"},
 				{GPUType: "B200", GPUCount: "2", ColdStartTimeToLoadSeconds: "559.9"},
@@ -1224,12 +1224,12 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 			if len(got.ColdStartMatrix) != len(tt.wantColdStartMatrix) {
 				t.Errorf("parseMetadataJSON() ColdStartMatrix length = %d, want %d", len(got.ColdStartMatrix), len(tt.wantColdStartMatrix))
 			} else {
-			for i, entry := range got.ColdStartMatrix {
-				want := tt.wantColdStartMatrix[i]
-				if entry.GPUType != want.GPUType || entry.GPUCount != want.GPUCount || entry.ColdStartTimeToLoadSeconds != want.ColdStartTimeToLoadSeconds || entry.RuntimeCommand != want.RuntimeCommand {
-					t.Errorf("parseMetadataJSON() ColdStartMatrix[%d] = %+v, want %+v", i, entry, want)
+				for i, entry := range got.ColdStartMatrix {
+					want := tt.wantColdStartMatrix[i]
+					if entry.GPUType != want.GPUType || entry.GPUCount != want.GPUCount || entry.ColdStartTimeToLoadSeconds != want.ColdStartTimeToLoadSeconds || entry.RuntimeCommand != want.RuntimeCommand {
+						t.Errorf("parseMetadataJSON() ColdStartMatrix[%d] = %+v, want %+v", i, entry, want)
+					}
 				}
-			}
 			}
 		})
 	}
