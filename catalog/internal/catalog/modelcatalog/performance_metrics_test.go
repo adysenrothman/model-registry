@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kubeflow/hub/catalog/internal/catalog/modelcatalog/models"
+	dbmodels "github.com/kubeflow/hub/internal/platform/db/entity"
 )
 
 func TestParseMetadataJSON(t *testing.T) {
@@ -1523,16 +1524,234 @@ func TestEnrichCatalogModelFromMetadata_NewFields(t *testing.T) {
 	} else if v != "80GB" {
 		t.Errorf("min_vram_gb = %q, want %q", v, "80GB")
 	}
+}
 
-	csJSON, ok := propMap["cold_start_matrix"]
-	if !ok {
-		t.Fatal("expected custom property 'cold_start_matrix' to be set")
+func TestCreateColdStartArtifact(t *testing.T) {
+	modelID := int32(42)
+	typeID := int32(7)
+	modelName := "RedHatAI/MiniMax-M2.5"
+
+	tests := []struct {
+		name           string
+		entry          coldStartEntry
+		wantGPUType    string
+		wantGPUCount   string
+		wantSeconds    *float64
+		wantExtID      string
+		wantArtName    string
+		wantRuntimeCmd string
+	}{
+		{
+			name: "valid entry with numeric seconds",
+			entry: coldStartEntry{
+				GPUType:                    "A100-80",
+				GPUCount:                   "4",
+				ColdStartTimeToLoadSeconds: "587.3",
+			},
+			wantGPUType:    "A100-80",
+			wantGPUCount:   "4",
+			wantSeconds:    new(float64(587.3)),
+			wantExtID:      "cold-start-42-A100-80-4",
+			wantArtName:    "cold-start-A100-80-4",
+			wantRuntimeCmd: "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --max-model-len -1 --tensor-parallel-size 4 --trust-remote-code",
+		},
+		{
+			name: "valid entry with integer seconds",
+			entry: coldStartEntry{
+				GPUType:                    "H100",
+				GPUCount:                   "1",
+				ColdStartTimeToLoadSeconds: "68",
+			},
+			wantGPUType:    "H100",
+			wantGPUCount:   "1",
+			wantSeconds:    new(float64(68)),
+			wantExtID:      "cold-start-42-H100-1",
+			wantArtName:    "cold-start-H100-1",
+			wantRuntimeCmd: "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --max-model-len -1 --tensor-parallel-size 1 --trust-remote-code",
+		},
+		{
+			name: "invalid seconds value omits seconds property",
+			entry: coldStartEntry{
+				GPUType:                    "B200",
+				GPUCount:                   "2",
+				ColdStartTimeToLoadSeconds: "not-a-number",
+			},
+			wantGPUType:    "B200",
+			wantGPUCount:   "2",
+			wantSeconds:    nil,
+			wantExtID:      "cold-start-42-B200-2",
+			wantArtName:    "cold-start-B200-2",
+			wantRuntimeCmd: "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --max-model-len -1 --tensor-parallel-size 2 --trust-remote-code",
+		},
 	}
 
-	wantJSON := `[{"gpu_type":"A100","gpu_count":"2","cold_start_time_to_load_seconds":"127.3"},{"gpu_type":"H100","gpu_count":"1","cold_start_time_to_load_seconds":"68.9"}]`
-	if csJSON != wantJSON {
-		t.Errorf("cold_start_matrix JSON mismatch\ngot:  %s\nwant: %s", csJSON, wantJSON)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			artifact := createColdStartArtifact(tt.entry, modelID, typeID, modelName)
+
+			if artifact == nil {
+				t.Fatal("expected non-nil artifact")
+			}
+
+			// Verify type and metrics type
+			if *artifact.TypeID != typeID {
+				t.Errorf("TypeID = %d, want %d", *artifact.TypeID, typeID)
+			}
+			attrs := artifact.GetAttributes()
+			if attrs.MetricsType != models.MetricsTypeColdStart {
+				t.Errorf("MetricsType = %q, want %q", attrs.MetricsType, models.MetricsTypeColdStart)
+			}
+
+			// Verify naming
+			if *attrs.ExternalID != tt.wantExtID {
+				t.Errorf("ExternalID = %q, want %q", *attrs.ExternalID, tt.wantExtID)
+			}
+			if *attrs.Name != tt.wantArtName {
+				t.Errorf("Name = %q, want %q", *attrs.Name, tt.wantArtName)
+			}
+
+			// Verify timestamps are set
+			if attrs.CreateTimeSinceEpoch == nil || *attrs.CreateTimeSinceEpoch <= 0 {
+				t.Error("expected CreateTimeSinceEpoch to be set")
+			}
+			if attrs.LastUpdateTimeSinceEpoch == nil || *attrs.LastUpdateTimeSinceEpoch <= 0 {
+				t.Error("expected LastUpdateTimeSinceEpoch to be set")
+			}
+
+			// Verify custom properties
+			customProps := artifact.GetCustomProperties()
+			if customProps == nil {
+				t.Fatal("expected custom properties to be set")
+			}
+			propMap := make(map[string]interface{})
+			for _, p := range *customProps {
+				if p.StringValue != nil {
+					propMap[p.Name] = *p.StringValue
+				} else if p.DoubleValue != nil {
+					propMap[p.Name] = *p.DoubleValue
+				}
+			}
+
+			if propMap["gpu_type"] != tt.wantGPUType {
+				t.Errorf("gpu_type = %v, want %q", propMap["gpu_type"], tt.wantGPUType)
+			}
+			if propMap["gpu_count"] != tt.wantGPUCount {
+				t.Errorf("gpu_count = %v, want %q", propMap["gpu_count"], tt.wantGPUCount)
+			}
+			if propMap["runtime_command"] != tt.wantRuntimeCmd {
+				t.Errorf("runtime_command = %v, want %q", propMap["runtime_command"], tt.wantRuntimeCmd)
+			}
+			if tt.wantSeconds != nil {
+				if propMap["cold_start_time_to_load_seconds"] != *tt.wantSeconds {
+					t.Errorf("cold_start_time_to_load_seconds = %v, want %v", propMap["cold_start_time_to_load_seconds"], *tt.wantSeconds)
+				}
+			} else {
+				if _, exists := propMap["cold_start_time_to_load_seconds"]; exists {
+					t.Error("expected cold_start_time_to_load_seconds to be absent for invalid input")
+				}
+			}
+		})
 	}
+}
+
+func TestProcessModelArtifactsBatch_ColdStartOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	coldStartMatrix := []coldStartEntry{
+		{GPUType: "A100", GPUCount: "2", ColdStartTimeToLoadSeconds: "127.3"},
+		{GPUType: "H100", GPUCount: "1", ColdStartTimeToLoadSeconds: "68.9"},
+	}
+
+	modelID := int32(1)
+	typeID := int32(7)
+
+	var savedArtifacts []models.CatalogMetricsArtifact
+	mockRepo := &mockMetricsArtifactRepo{
+		listResult: &dbmodels.ListWrapper[models.CatalogMetricsArtifact]{},
+		batchSaveFunc: func(artifacts []models.CatalogMetricsArtifact, parentID *int32) ([]models.CatalogMetricsArtifact, error) {
+			savedArtifacts = artifacts
+			return artifacts, nil
+		},
+	}
+
+	count, err := processModelArtifactsBatch(tmpDir, modelID, "test-model", nil, coldStartMatrix, mockRepo, typeID)
+	if err != nil {
+		t.Fatalf("processModelArtifactsBatch() error = %v", err)
+	}
+
+	if count != 2 {
+		t.Errorf("processModelArtifactsBatch() returned count = %d, want 2", count)
+	}
+
+	if len(savedArtifacts) != 2 {
+		t.Fatalf("expected 2 saved artifacts, got %d", len(savedArtifacts))
+	}
+
+	// Verify both artifacts have cold-start metrics type
+	for _, a := range savedArtifacts {
+		if a.GetAttributes().MetricsType != models.MetricsTypeColdStart {
+			t.Errorf("expected MetricsType %q, got %q", models.MetricsTypeColdStart, a.GetAttributes().MetricsType)
+		}
+	}
+}
+
+func TestProcessModelArtifactsBatch_ColdStartDedup(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	coldStartMatrix := []coldStartEntry{
+		{GPUType: "A100", GPUCount: "2", ColdStartTimeToLoadSeconds: "127.3"},
+	}
+
+	modelID := int32(1)
+	typeID := int32(7)
+	existingExternalID := "cold-start-1-A100-2"
+
+	mockRepo := &mockMetricsArtifactRepo{
+		listResult: &dbmodels.ListWrapper[models.CatalogMetricsArtifact]{
+			Items: []models.CatalogMetricsArtifact{
+				&models.CatalogMetricsArtifactImpl{
+					Attributes: &models.CatalogMetricsArtifactAttributes{
+						ExternalID: &existingExternalID,
+					},
+				},
+			},
+			Size: 1,
+		},
+	}
+
+	count, err := processModelArtifactsBatch(tmpDir, modelID, "test-model", nil, coldStartMatrix, mockRepo, typeID)
+	if err != nil {
+		t.Fatalf("processModelArtifactsBatch() error = %v", err)
+	}
+
+	if count != 0 {
+		t.Errorf("processModelArtifactsBatch() returned count = %d, want 0 (all duplicates)", count)
+	}
+}
+
+// mockMetricsArtifactRepo is a minimal mock for CatalogMetricsArtifactRepository used in batch tests
+type mockMetricsArtifactRepo struct {
+	listResult    *dbmodels.ListWrapper[models.CatalogMetricsArtifact]
+	batchSaveFunc func([]models.CatalogMetricsArtifact, *int32) ([]models.CatalogMetricsArtifact, error)
+}
+
+func (m *mockMetricsArtifactRepo) GetByID(id int32) (models.CatalogMetricsArtifact, error) {
+	return nil, nil
+}
+
+func (m *mockMetricsArtifactRepo) List(opts models.CatalogMetricsArtifactListOptions) (*dbmodels.ListWrapper[models.CatalogMetricsArtifact], error) {
+	return m.listResult, nil
+}
+
+func (m *mockMetricsArtifactRepo) Save(artifact models.CatalogMetricsArtifact, parentID *int32) (models.CatalogMetricsArtifact, error) {
+	return artifact, nil
+}
+
+func (m *mockMetricsArtifactRepo) BatchSave(artifacts []models.CatalogMetricsArtifact, parentID *int32) ([]models.CatalogMetricsArtifact, error) {
+	if m.batchSaveFunc != nil {
+		return m.batchSaveFunc(artifacts, parentID)
+	}
+	return artifacts, nil
 }
 
 // cacheKeys returns all keys from a map for diagnostic output.
