@@ -1226,9 +1226,9 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 			} else {
 				for i, entry := range got.ColdStartMatrix {
 					want := tt.wantColdStartMatrix[i]
-					if entry.GPUType != want.GPUType || entry.GPUCount != want.GPUCount || entry.ColdStartTimeToLoadSeconds != want.ColdStartTimeToLoadSeconds {
-						t.Errorf("parseMetadataJSON() ColdStartMatrix[%d] = %+v, want %+v", i, entry, want)
-					}
+				if entry.GPUType != want.GPUType || entry.GPUCount != want.GPUCount || entry.ColdStartTimeToLoadSeconds != want.ColdStartTimeToLoadSeconds || entry.RuntimeCommand != want.RuntimeCommand {
+					t.Errorf("parseMetadataJSON() ColdStartMatrix[%d] = %+v, want %+v", i, entry, want)
+				}
 				}
 			}
 		})
@@ -1589,7 +1589,8 @@ func TestCreateColdStartArtifact(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			artifact := createColdStartArtifact(tt.entry, modelID, typeID)
+			externalID := coldStartExternalID(modelID, tt.entry)
+			artifact := createColdStartArtifact(tt.entry, externalID, typeID)
 
 			if artifact == nil {
 				t.Fatal("expected non-nil artifact")

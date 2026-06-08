@@ -403,10 +403,14 @@ func processModelArtifactsBatch(dirPath string, modelID int32, modelName string,
 	}
 
 	// Check cold-start artifacts (one per GPU configuration from metadata.json)
-	for _, csEntry := range coldStartMatrix {
-		externalID := fmt.Sprintf("cold-start-%d-%s-%s", modelID, csEntry.GPUType, csEntry.GPUCount)
+	for i, csEntry := range coldStartMatrix {
+		if csEntry.GPUType == "" || csEntry.GPUCount == "" {
+			glog.Warningf("Skipping cold-start entry %d for model %s: gpu_type and gpu_count are required", i, modelName)
+			continue
+		}
+		externalID := coldStartExternalID(modelID, csEntry)
 		if !existingArtifactsMap[externalID] {
-			artifact := createColdStartArtifact(csEntry, modelID, metricsArtifactTypeID)
+			artifact := createColdStartArtifact(csEntry, externalID, metricsArtifactTypeID)
 			artifactsToInsert = append(artifactsToInsert, artifact)
 		} else {
 			glog.V(2).Infof("Cold-start artifact %s already exists, skipping", externalID)
@@ -675,10 +679,13 @@ func createPerformanceArtifact(perfRecord performanceRecord, modelID int32, type
 	return metricsArtifact
 }
 
+func coldStartExternalID(modelID int32, entry coldStartEntry) string {
+	return fmt.Sprintf("cold-start-%d-%s-%s", modelID, entry.GPUType, entry.GPUCount)
+}
+
 // createColdStartArtifact creates a metrics artifact from a single cold-start matrix entry.
 // Each GPU configuration becomes its own artifact with discrete, filterable custom properties.
-func createColdStartArtifact(entry coldStartEntry, modelID int32, typeID int32) *dbmodels.CatalogMetricsArtifactImpl {
-	externalID := fmt.Sprintf("cold-start-%d-%s-%s", modelID, entry.GPUType, entry.GPUCount)
+func createColdStartArtifact(entry coldStartEntry, externalID string, typeID int32) *dbmodels.CatalogMetricsArtifactImpl {
 	artifactName := fmt.Sprintf("cold-start-%s-%s", entry.GPUType, entry.GPUCount)
 
 	now := time.Now().UnixMilli()
