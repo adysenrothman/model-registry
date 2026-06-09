@@ -405,8 +405,8 @@ func processModelArtifactsBatch(dirPath string, modelID int32, modelName string,
 
 	// Check cold-start artifacts (one per GPU configuration from metadata.json)
 	for i, csEntry := range coldStartMatrix {
-		if csEntry.GPUType == "" || csEntry.GPUCount == 0 {
-			glog.Warningf("Skipping cold-start entry %d for model %s: gpu_type and gpu_count are required", i, modelName)
+		if csEntry.GPUType == "" || csEntry.GPUCount <= 0 {
+			glog.Warningf("Skipping cold-start entry %d for model %s: gpu_type and gpu_count (positive) are required", i, modelName)
 			continue
 		}
 		externalID := coldStartExternalID(modelID, csEntry)

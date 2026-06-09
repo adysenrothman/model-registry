@@ -956,15 +956,17 @@ func TestUnmarshalJSON_EdgeCases(t *testing.T) {
 
 func TestParseMetadataJSON_NewFields(t *testing.T) {
 	tests := []struct {
-		name                string
-		jsonData            string
-		wantID              string
-		wantSize            *string
-		wantTensorType      *string
-		wantVariantID       *string
-		wantMinVRAMGB       *float64
-		wantColdStartMatrix []coldStartEntry
-		wantErr             bool
+		name                       string
+		jsonData                   string
+		wantID                     string
+		wantSize                   *string
+		wantTensorType             *string
+		wantVariantID              *string
+		wantMinVRAMGB              *float64
+		wantModelcarImageSize      *float64
+		wantModelcarImageSizeBytes *int64
+		wantColdStartMatrix        []coldStartEntry
+		wantErr                    bool
 	}{
 		{
 			name: "complete metadata with all new fields",
@@ -1149,6 +1151,24 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "metadata with modelcar image size fields",
+			jsonData: `{
+				"id": "sample-model/test-405b-instruct",
+				"size": "405B params",
+				"tensor_type": "FP8",
+				"min_vram_gb": 265.0,
+				"modelcar_image_size": 405.19,
+				"modelcar_image_size_bytes": 405186009411
+			}`,
+			wantID:                     "sample-model/test-405b-instruct",
+			wantSize:                   &[]string{"405B params"}[0],
+			wantTensorType:             &[]string{"FP8"}[0],
+			wantMinVRAMGB:              &[]float64{265.0}[0],
+			wantModelcarImageSize:      &[]float64{405.19}[0],
+			wantModelcarImageSizeBytes: &[]int64{405186009411}[0],
+			wantErr:                    false,
+		},
+		{
 			name: "metadata with runtime_command in cold-start matrix",
 			jsonData: `{
 				"id": "RedHatAI/MiniMax-M2.5",
@@ -1220,6 +1240,20 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 				t.Errorf("parseMetadataJSON() MinVRAMGB nil mismatch: got %v, want %v", got.MinVRAMGB, tt.wantMinVRAMGB)
 			} else if got.MinVRAMGB != nil && *got.MinVRAMGB != *tt.wantMinVRAMGB {
 				t.Errorf("parseMetadataJSON() MinVRAMGB = %v, want %v", *got.MinVRAMGB, *tt.wantMinVRAMGB)
+			}
+
+			// Test ModelcarImageSize field
+			if (got.ModelcarImageSize == nil) != (tt.wantModelcarImageSize == nil) {
+				t.Errorf("parseMetadataJSON() ModelcarImageSize nil mismatch: got %v, want %v", got.ModelcarImageSize, tt.wantModelcarImageSize)
+			} else if got.ModelcarImageSize != nil && *got.ModelcarImageSize != *tt.wantModelcarImageSize {
+				t.Errorf("parseMetadataJSON() ModelcarImageSize = %v, want %v", *got.ModelcarImageSize, *tt.wantModelcarImageSize)
+			}
+
+			// Test ModelcarImageSizeBytes field
+			if (got.ModelcarImageSizeBytes == nil) != (tt.wantModelcarImageSizeBytes == nil) {
+				t.Errorf("parseMetadataJSON() ModelcarImageSizeBytes nil mismatch: got %v, want %v", got.ModelcarImageSizeBytes, tt.wantModelcarImageSizeBytes)
+			} else if got.ModelcarImageSizeBytes != nil && *got.ModelcarImageSizeBytes != *tt.wantModelcarImageSizeBytes {
+				t.Errorf("parseMetadataJSON() ModelcarImageSizeBytes = %v, want %v", *got.ModelcarImageSizeBytes, *tt.wantModelcarImageSizeBytes)
 			}
 
 			// Test ColdStartMatrix field
@@ -1743,6 +1777,48 @@ func TestProcessModelArtifactsBatch_ColdStartDedup(t *testing.T) {
 
 	if count != 0 {
 		t.Errorf("processModelArtifactsBatch() returned count = %d, want 0 (all duplicates)", count)
+	}
+}
+
+func TestProcessModelArtifactsBatch_ColdStartInvalidGPUCount(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	coldStartMatrix := []coldStartEntry{
+		{GPUType: "A100", GPUCount: -1, ColdStartTimeToLoadSeconds: 100.0},
+		{GPUType: "H100", GPUCount: 0, ColdStartTimeToLoadSeconds: 50.0},
+		{GPUType: "", GPUCount: 4, ColdStartTimeToLoadSeconds: 200.0},
+		{GPUType: "H200", GPUCount: 2, ColdStartTimeToLoadSeconds: 75.5},
+	}
+
+	modelID := int32(1)
+	typeID := int32(7)
+
+	var savedArtifacts []models.CatalogMetricsArtifact
+	mockRepo := &mockMetricsArtifactRepo{
+		listResult: &dbmodels.ListWrapper[models.CatalogMetricsArtifact]{},
+		batchSaveFunc: func(artifacts []models.CatalogMetricsArtifact, parentID *int32) ([]models.CatalogMetricsArtifact, error) {
+			savedArtifacts = artifacts
+			return artifacts, nil
+		},
+	}
+
+	count, err := processModelArtifactsBatch(tmpDir, modelID, "test-model", nil, coldStartMatrix, mockRepo, typeID)
+	if err != nil {
+		t.Fatalf("processModelArtifactsBatch() error = %v", err)
+	}
+
+	if count != 1 {
+		t.Errorf("processModelArtifactsBatch() returned count = %d, want 1 (only H200 entry is valid)", count)
+	}
+
+	if len(savedArtifacts) != 1 {
+		t.Fatalf("expected 1 saved artifact, got %d", len(savedArtifacts))
+	}
+
+	attrs := savedArtifacts[0].GetAttributes()
+	wantExtID := "cold-start-1-H200-2"
+	if *attrs.ExternalID != wantExtID {
+		t.Errorf("expected saved artifact ExternalID = %q, got %q", wantExtID, *attrs.ExternalID)
 	}
 }
 

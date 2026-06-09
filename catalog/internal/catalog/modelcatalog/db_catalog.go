@@ -59,7 +59,7 @@ func (d *dbCatalogImpl) GetModel(ctx context.Context, modelName string, sourceID
 
 	model, err := mapDBModelToAPIModel(modelsList.Items[0])
 	if err != nil {
-		glog.Warningf("error mapping custom properties for model %s: %v", modelName, err)
+		return nil, fmt.Errorf("error mapping model %s: %w", modelName, err)
 	}
 
 	return &model, nil
@@ -112,7 +112,8 @@ func (d *dbCatalogImpl) ListModels(ctx context.Context, params ListModelsParams)
 	for _, model := range modelsList.Items {
 		apiModel, err := mapDBModelToAPIModel(model)
 		if err != nil {
-			glog.Warningf("error mapping custom properties for model: %v", err)
+			glog.Warningf("error mapping model, skipping: %v", err)
+			continue
 		}
 		modelList.Items = append(modelList.Items, apiModel)
 	}
