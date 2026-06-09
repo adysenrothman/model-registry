@@ -22,13 +22,15 @@ import (
 // metadataJSON represents the minimal structure needed from metadata.json files
 // Only the ID field is needed to look up existing models
 type metadataJSON struct {
-	ID              string           `json:"id"`                // Maps to model name for lookup
-	OverallAccuracy *float64         `json:"overall_accuracy"`  // Overall accuracy score for the model
-	Size            *string          `json:"size"`              // Model parameter count (e.g., "8B params")
-	TensorType      *string          `json:"tensor_type"`       // Data precision (e.g., "FP16", "INT4")
-	VariantGroupID  *string          `json:"variant_group_id"`  // UUID linking model variants together
-	MinVRAMGB       *string          `json:"min_vram_gb"`       // Minimum VRAM required (e.g., "265 GB")
-	ColdStartMatrix []coldStartEntry `json:"cold_start_matrix"` // Cold start times per GPU configuration
+	ID                    string           `json:"id"`                       // Maps to model name for lookup
+	OverallAccuracy       *float64         `json:"overall_accuracy"`         // Overall accuracy score for the model
+	Size                  *string          `json:"size"`                     // Model parameter count (e.g., "8B params")
+	TensorType            *string          `json:"tensor_type"`              // Data precision (e.g., "FP16", "INT4")
+	VariantGroupID        *string          `json:"variant_group_id"`         // UUID linking model variants together
+	MinVRAMGB             *string          `json:"min_vram_gb"`              // Minimum VRAM required (e.g., "265 GB")
+	ModelcarImageSize     *string          `json:"modelcar_image_size"`      // Human-readable modelcar image size (e.g., "230.17 GB")
+	ModelcarImageSizeBytes *int64          `json:"modelcar_image_size_bytes"` // Modelcar image size in bytes
+	ColdStartMatrix       []coldStartEntry `json:"cold_start_matrix"`        // Cold start times per GPU configuration
 }
 
 type coldStartEntry struct {
@@ -761,6 +763,23 @@ func enrichCatalogModelFromMetadata(existingModel dbmodels.CatalogModel, metadat
 		customProperties = append(customProperties, models.Properties{
 			Name:             "min_vram_gb",
 			StringValue:      metadata.MinVRAMGB,
+			IsCustomProperty: true,
+		})
+	}
+
+	if metadata.ModelcarImageSize != nil && *metadata.ModelcarImageSize != "" {
+		customProperties = append(customProperties, models.Properties{
+			Name:             "modelcar_image_size",
+			StringValue:      metadata.ModelcarImageSize,
+			IsCustomProperty: true,
+		})
+	}
+
+	if metadata.ModelcarImageSizeBytes != nil {
+		bytesStr := strconv.FormatInt(*metadata.ModelcarImageSizeBytes, 10)
+		customProperties = append(customProperties, models.Properties{
+			Name:             "modelcar_image_size_bytes",
+			StringValue:      &bytesStr,
 			IsCustomProperty: true,
 		})
 	}

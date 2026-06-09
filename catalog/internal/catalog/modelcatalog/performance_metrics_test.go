@@ -956,15 +956,17 @@ func TestUnmarshalJSON_EdgeCases(t *testing.T) {
 
 func TestParseMetadataJSON_NewFields(t *testing.T) {
 	tests := []struct {
-		name                string
-		jsonData            string
-		wantID              string
-		wantSize            *string
-		wantTensorType      *string
-		wantVariantID       *string
-		wantMinVRAMGB       *string
-		wantColdStartMatrix []coldStartEntry
-		wantErr             bool
+		name                       string
+		jsonData                   string
+		wantID                     string
+		wantSize                   *string
+		wantTensorType             *string
+		wantVariantID              *string
+		wantMinVRAMGB              *string
+		wantModelcarImageSize      *string
+		wantModelcarImageSizeBytes *int64
+		wantColdStartMatrix        []coldStartEntry
+		wantErr                    bool
 	}{
 		{
 			name: "complete metadata with all new fields",
@@ -1124,6 +1126,8 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 				"tensor_type": "FP8",
 				"variant_group_id": "vwx234mn-5678-901v-wx23-456789abcdef",
 				"min_vram_gb": "265 GB",
+				"modelcar_image_size": "230.17 GB",
+				"modelcar_image_size_bytes": 230171650363,
 				"cold_start_matrix": [
 					{
 						"gpu_type": "A100-80",
@@ -1137,11 +1141,13 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 					}
 				]
 			}`,
-			wantID:         "sample-model/test-405b-instruct",
-			wantSize:       &[]string{"405B params"}[0],
-			wantTensorType: &[]string{"FP8"}[0],
-			wantVariantID:  &[]string{"vwx234mn-5678-901v-wx23-456789abcdef"}[0],
-			wantMinVRAMGB:  &[]string{"265 GB"}[0],
+			wantID:                     "sample-model/test-405b-instruct",
+			wantSize:                   &[]string{"405B params"}[0],
+			wantTensorType:             &[]string{"FP8"}[0],
+			wantVariantID:              &[]string{"vwx234mn-5678-901v-wx23-456789abcdef"}[0],
+			wantMinVRAMGB:              &[]string{"265 GB"}[0],
+			wantModelcarImageSize:      &[]string{"230.17 GB"}[0],
+			wantModelcarImageSizeBytes: &[]int64{230171650363}[0],
 			wantColdStartMatrix: []coldStartEntry{
 				{GPUType: "A100-80", GPUCount: "4", ColdStartTimeToLoadSeconds: "587.3"},
 				{GPUType: "B200", GPUCount: "2", ColdStartTimeToLoadSeconds: "559.9"},
@@ -1218,6 +1224,16 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 			// Test MinVRAMGB field
 			if (got.MinVRAMGB == nil) != (tt.wantMinVRAMGB == nil) || (got.MinVRAMGB != nil && tt.wantMinVRAMGB != nil && *got.MinVRAMGB != *tt.wantMinVRAMGB) {
 				t.Errorf("parseMetadataJSON() MinVRAMGB = %v, want %v", got.MinVRAMGB, tt.wantMinVRAMGB)
+			}
+
+			// Test ModelcarImageSize field
+			if (got.ModelcarImageSize == nil) != (tt.wantModelcarImageSize == nil) || (got.ModelcarImageSize != nil && tt.wantModelcarImageSize != nil && *got.ModelcarImageSize != *tt.wantModelcarImageSize) {
+				t.Errorf("parseMetadataJSON() ModelcarImageSize = %v, want %v", got.ModelcarImageSize, tt.wantModelcarImageSize)
+			}
+
+			// Test ModelcarImageSizeBytes field
+			if (got.ModelcarImageSizeBytes == nil) != (tt.wantModelcarImageSizeBytes == nil) || (got.ModelcarImageSizeBytes != nil && tt.wantModelcarImageSizeBytes != nil && *got.ModelcarImageSizeBytes != *tt.wantModelcarImageSizeBytes) {
+				t.Errorf("parseMetadataJSON() ModelcarImageSizeBytes = %v, want %v", got.ModelcarImageSizeBytes, tt.wantModelcarImageSizeBytes)
 			}
 
 			// Test ColdStartMatrix field
@@ -1477,9 +1493,13 @@ func TestEnrichCatalogModelFromMetadata_NewFields(t *testing.T) {
 	}
 
 	minVRAM := "80GB"
+	modelcarSize := "230.17 GB"
+	modelcarSizeBytes := int64(230171650363)
 	metadata := metadataJSON{
-		ID:        modelName,
-		MinVRAMGB: &minVRAM,
+		ID:                     modelName,
+		MinVRAMGB:              &minVRAM,
+		ModelcarImageSize:      &modelcarSize,
+		ModelcarImageSizeBytes: &modelcarSizeBytes,
 		ColdStartMatrix: []coldStartEntry{
 			{GPUType: "A100", GPUCount: "2", ColdStartTimeToLoadSeconds: "127.3"},
 			{GPUType: "H100", GPUCount: "1", ColdStartTimeToLoadSeconds: "68.9"},
@@ -1509,6 +1529,18 @@ func TestEnrichCatalogModelFromMetadata_NewFields(t *testing.T) {
 		t.Error("expected custom property 'min_vram_gb' to be set")
 	} else if v != "80GB" {
 		t.Errorf("min_vram_gb = %q, want %q", v, "80GB")
+	}
+
+	if v, ok := propMap["modelcar_image_size"]; !ok {
+		t.Error("expected custom property 'modelcar_image_size' to be set")
+	} else if v != "230.17 GB" {
+		t.Errorf("modelcar_image_size = %q, want %q", v, "230.17 GB")
+	}
+
+	if v, ok := propMap["modelcar_image_size_bytes"]; !ok {
+		t.Error("expected custom property 'modelcar_image_size_bytes' to be set")
+	} else if v != "230171650363" {
+		t.Errorf("modelcar_image_size_bytes = %q, want %q", v, "230171650363")
 	}
 }
 
