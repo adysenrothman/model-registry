@@ -714,7 +714,8 @@ func TestDBCatalog(t *testing.T) {
 				},
 			}
 
-			result := mapDBModelToAPIModel(catalogModel)
+			result, err := mapDBModelToAPIModel(catalogModel)
+			assert.NoError(t, err)
 
 			assert.Equal(t, "123", *result.Id)
 			assert.Equal(t, "mapping-test-model", result.Name)
@@ -834,7 +835,8 @@ func TestDBCatalog(t *testing.T) {
 				},
 			}
 
-			result := mapDBModelToAPIModel(catalogModel)
+			result, err := mapDBModelToAPIModel(catalogModel)
+			assert.NoError(t, err)
 
 			assert.Equal(t, "malformed-json-model", result.Name)
 			assert.Nil(t, result.ValidatedTasks)

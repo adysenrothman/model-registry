@@ -9,7 +9,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -27,15 +26,17 @@ type metadataJSON struct {
 	Size            *string          `json:"size"`              // Model parameter count (e.g., "8B params")
 	TensorType      *string          `json:"tensor_type"`       // Data precision (e.g., "FP16", "INT4")
 	VariantGroupID  *string          `json:"variant_group_id"`  // UUID linking model variants together
-	MinVRAMGB       *string          `json:"min_vram_gb"`       // Minimum VRAM required (e.g., "265 GB")
-	ColdStartMatrix []coldStartEntry `json:"cold_start_matrix"` // Cold start times per GPU configuration
+	MinVRAMGB              *float64         `json:"min_vram_gb"`               // Minimum VRAM required in GB (e.g., 466.0)
+	ModelcarImageSize      *float64         `json:"modelcar_image_size"`       // Modelcar image size in GB (e.g., 405.19)
+	ModelcarImageSizeBytes *int64           `json:"modelcar_image_size_bytes"` // Modelcar image size in bytes (e.g., 405186009411)
+	ColdStartMatrix        []coldStartEntry `json:"cold_start_matrix"`         // Cold start times per GPU configuration
 }
 
 type coldStartEntry struct {
-	GPUType                    string `json:"gpu_type"`
-	GPUCount                   string `json:"gpu_count"`
-	ColdStartTimeToLoadSeconds string `json:"cold_start_time_to_load_seconds"`
-	RuntimeCommand             string `json:"runtime_command"`
+	GPUType                    string  `json:"gpu_type"`
+	GPUCount                   int     `json:"gpu_count"`
+	ColdStartTimeToLoadSeconds float64 `json:"cold_start_time_to_load_seconds"`
+	RuntimeCommand             string  `json:"runtime_command"`
 }
 
 // parseMetadataJSON parses JSON data into metadataJSON struct, extracting only the ID field
@@ -404,7 +405,7 @@ func processModelArtifactsBatch(dirPath string, modelID int32, modelName string,
 
 	// Check cold-start artifacts (one per GPU configuration from metadata.json)
 	for i, csEntry := range coldStartMatrix {
-		if csEntry.GPUType == "" || csEntry.GPUCount == "" {
+		if csEntry.GPUType == "" || csEntry.GPUCount == 0 {
 			glog.Warningf("Skipping cold-start entry %d for model %s: gpu_type and gpu_count are required", i, modelName)
 			continue
 		}
@@ -680,19 +681,20 @@ func createPerformanceArtifact(perfRecord performanceRecord, modelID int32, type
 }
 
 func coldStartExternalID(modelID int32, entry coldStartEntry) string {
-	return fmt.Sprintf("cold-start-%d-%s-%s", modelID, entry.GPUType, entry.GPUCount)
+	return fmt.Sprintf("cold-start-%d-%s-%d", modelID, entry.GPUType, entry.GPUCount)
 }
 
 // createColdStartArtifact creates a metrics artifact from a single cold-start matrix entry.
 // Each GPU configuration becomes its own artifact with discrete, filterable custom properties.
 func createColdStartArtifact(entry coldStartEntry, externalID string, typeID int32) *dbmodels.CatalogMetricsArtifactImpl {
-	artifactName := fmt.Sprintf("cold-start-%s-%s", entry.GPUType, entry.GPUCount)
+	artifactName := fmt.Sprintf("cold-start-%s-%d", entry.GPUType, entry.GPUCount)
 
 	now := time.Now().UnixMilli()
 
+	gpuCount := int32(entry.GPUCount)
 	customProperties := []models.Properties{
 		{Name: "gpu_type", StringValue: &entry.GPUType},
-		{Name: "gpu_count", StringValue: &entry.GPUCount},
+		{Name: "gpu_count", IntValue: &gpuCount},
 	}
 
 	if entry.RuntimeCommand != "" {
@@ -702,14 +704,12 @@ func createColdStartArtifact(entry coldStartEntry, externalID string, typeID int
 		})
 	}
 
-	if seconds, err := strconv.ParseFloat(entry.ColdStartTimeToLoadSeconds, 64); err == nil {
+	if entry.ColdStartTimeToLoadSeconds != 0 {
+		seconds := entry.ColdStartTimeToLoadSeconds
 		customProperties = append(customProperties, models.Properties{
 			Name:        "cold_start_time_to_load_seconds",
 			DoubleValue: &seconds,
 		})
-	} else {
-		glog.Warningf("cold-start artifact %s: invalid cold_start_time_to_load_seconds %q: %v",
-			externalID, entry.ColdStartTimeToLoadSeconds, err)
 	}
 
 	properties := []models.Properties{}
@@ -757,10 +757,27 @@ func enrichCatalogModelFromMetadata(existingModel dbmodels.CatalogModel, metadat
 		})
 	}
 
-	if metadata.MinVRAMGB != nil && *metadata.MinVRAMGB != "" {
+	if metadata.MinVRAMGB != nil {
 		customProperties = append(customProperties, models.Properties{
 			Name:             "min_vram_gb",
-			StringValue:      metadata.MinVRAMGB,
+			DoubleValue:      metadata.MinVRAMGB,
+			IsCustomProperty: true,
+		})
+	}
+
+	if metadata.ModelcarImageSize != nil {
+		customProperties = append(customProperties, models.Properties{
+			Name:             "modelcar_image_size",
+			DoubleValue:      metadata.ModelcarImageSize,
+			IsCustomProperty: true,
+		})
+	}
+
+	if metadata.ModelcarImageSizeBytes != nil {
+		bytesAsDouble := float64(*metadata.ModelcarImageSizeBytes)
+		customProperties = append(customProperties, models.Properties{
+			Name:             "modelcar_image_size_bytes",
+			DoubleValue:      &bytesAsDouble,
 			IsCustomProperty: true,
 		})
 	}

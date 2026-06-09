@@ -57,7 +57,10 @@ func (d *dbCatalogImpl) GetModel(ctx context.Context, modelName string, sourceID
 		return nil, fmt.Errorf("multiple models found for name=%v: %w", modelName, api.ErrNotFound)
 	}
 
-	model := mapDBModelToAPIModel(modelsList.Items[0])
+	model, err := mapDBModelToAPIModel(modelsList.Items[0])
+	if err != nil {
+		glog.Warningf("error mapping custom properties for model %s: %v", modelName, err)
+	}
 
 	return &model, nil
 }
@@ -107,7 +110,11 @@ func (d *dbCatalogImpl) ListModels(ctx context.Context, params ListModelsParams)
 	}
 
 	for _, model := range modelsList.Items {
-		modelList.Items = append(modelList.Items, mapDBModelToAPIModel(model))
+		apiModel, err := mapDBModelToAPIModel(model)
+		if err != nil {
+			glog.Warningf("error mapping custom properties for model: %v", err)
+		}
+		modelList.Items = append(modelList.Items, apiModel)
 	}
 
 	modelList.NextPageToken = modelsList.NextPageToken
@@ -305,7 +312,7 @@ func (d *dbCatalogImpl) GetPerformanceArtifacts(ctx context.Context, modelName s
 	return *artifactList, nil
 }
 
-func mapDBModelToAPIModel(m models.CatalogModel) apimodels.CatalogModel {
+func mapDBModelToAPIModel(m models.CatalogModel) (apimodels.CatalogModel, error) {
 	res := apimodels.CatalogModel{}
 
 	id := strconv.FormatInt(int64(*m.GetID()), 10)
@@ -405,20 +412,14 @@ func mapDBModelToAPIModel(m models.CatalogModel) apimodels.CatalogModel {
 
 	// Map custom properties
 	if m.GetCustomProperties() != nil && len(*m.GetCustomProperties()) > 0 {
-		customProps := make(map[string]apimodels.MetadataValue, len(*m.GetCustomProperties()))
-		for _, prop := range *m.GetCustomProperties() {
-			if prop.StringValue != nil {
-				customProps[prop.Name] = apimodels.MetadataStringValueAsMetadataValue(
-					apimodels.NewMetadataStringValue(*prop.StringValue, "MetadataStringValue"),
-				)
-			}
+		customPropsMap, err := converter.MapEmbedMDCustomProperties(*m.GetCustomProperties())
+		if err != nil {
+			return apimodels.CatalogModel{}, fmt.Errorf("error mapping custom properties: %w", err)
 		}
-		if len(customProps) > 0 {
-			res.CustomProperties = customProps
-		}
+		res.CustomProperties = convertMetadataValueMap(customPropsMap)
 	}
 
-	return res
+	return res, nil
 }
 
 func mapDBArtifactToAPIArtifact(a sharedmodels.CatalogArtifact) (apimodels.CatalogArtifact, error) {
@@ -637,7 +638,11 @@ func (d *dbCatalogImpl) FindModelsWithRecommendedLatency(
 
 	// Get recommended latency for each model
 	for _, model := range allModels.Items {
-		apiModel := mapDBModelToAPIModel(model)
+		apiModel, err := mapDBModelToAPIModel(model)
+		if err != nil {
+			glog.Warningf("error mapping model: %v, skipping", err)
+			continue
+		}
 
 		// Extract source ID from model properties
 		sourceID := ""
