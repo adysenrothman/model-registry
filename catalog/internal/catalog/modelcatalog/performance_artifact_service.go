@@ -85,7 +85,7 @@ func (s *PerformanceArtifactService) GetArtifacts(params PerformanceArtifactPara
 	// Partition into benchmark vs cold-start artifacts. They share the same
 	// metricsType but have different property schemas; validation and
 	// processing (targetRPS, recommendations) only apply to benchmarks.
-	benchmarks, coldStarts := s.partitionBySubType(artifacts)
+	benchmarks, _ := s.partitionBySubType(artifacts)
 
 	// Validate custom properties only on benchmark artifacts
 	if err := s.validateCustomProperties(benchmarks, params.RPSProperty, params.LatencyProperty, params.HardwareCountProperty, params.HardwareTypeProperty); err != nil {
@@ -95,11 +95,23 @@ func (s *PerformanceArtifactService) GetArtifacts(params PerformanceArtifactPara
 	// Apply performance-specific processing to benchmark artifacts only
 	benchmarks = s.processArtifacts(benchmarks, params)
 
-	// Combine processed benchmarks with unmodified cold-start artifacts
-	combined := append(benchmarks, coldStarts...)
+	// Rebuild the output in the original repository order: cold-start artifacts
+	// stay in-place, benchmark artifacts are replaced by the processed/filtered
+	// subset (which may be smaller after recommendation filtering).
+	keptBenchmarks := s.buildIDSet(benchmarks)
+	result := make([]sharedmodels.CatalogMetricsArtifact, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		if s.isColdStartArtifact(artifact) {
+			result = append(result, artifact)
+		} else if id := artifact.GetID(); id != nil {
+			if _, kept := keptBenchmarks[*id]; kept {
+				result = append(result, keptBenchmarks[*id])
+			}
+		}
+	}
 
 	list := &dbmodels.ListWrapper[sharedmodels.CatalogMetricsArtifact]{
-		Items:         combined,
+		Items:         result,
 		PageSize:      dbResult.PageSize,
 		Size:          dbResult.Size,
 		NextPageToken: dbResult.NextPageToken,
@@ -138,6 +150,18 @@ func (s *PerformanceArtifactService) partitionBySubType(artifacts []sharedmodels
 
 func (s *PerformanceArtifactService) isColdStartArtifact(artifact sharedmodels.CatalogMetricsArtifact) bool {
 	return s.extractCustomPropertiesStringValue(artifact.GetCustomProperties(), "performance_sub_type") == "cold-start"
+}
+
+// buildIDSet indexes processed benchmark artifacts by their ID so that the
+// caller can look up the processed version while iterating in repo order.
+func (s *PerformanceArtifactService) buildIDSet(artifacts []sharedmodels.CatalogMetricsArtifact) map[int32]sharedmodels.CatalogMetricsArtifact {
+	m := make(map[int32]sharedmodels.CatalogMetricsArtifact, len(artifacts))
+	for _, a := range artifacts {
+		if id := a.GetID(); id != nil {
+			m[*id] = a
+		}
+	}
+	return m
 }
 
 func (s *PerformanceArtifactService) processArtifacts(artifacts []sharedmodels.CatalogMetricsArtifact, params PerformanceArtifactParams) []sharedmodels.CatalogMetricsArtifact {

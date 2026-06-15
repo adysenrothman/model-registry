@@ -796,11 +796,14 @@ func TestGetArtifacts_MixedBenchmarkAndColdStart(t *testing.T) {
 	coldStart := "cold-start"
 	id1 := int32(1)
 	id2 := int32(2)
+	id3 := int32(3)
+
+	// Repository returns: benchmark, cold-start, benchmark (interleaved)
 	testArtifacts := []sharedmodels.CatalogArtifact{
 		{
 			CatalogMetricsArtifact: &dbmodels.BaseEntity[models.CatalogMetricsArtifactAttributes]{
 				Attributes: &models.CatalogMetricsArtifactAttributes{
-					Name:        new("benchmark-artifact"),
+					Name:        new("benchmark-1"),
 					MetricsType: models.MetricsTypePerformance,
 				},
 				Properties: &[]dbmodels.Properties{},
@@ -826,9 +829,25 @@ func TestGetArtifacts_MixedBenchmarkAndColdStart(t *testing.T) {
 				},
 			},
 		},
+		{
+			CatalogMetricsArtifact: &dbmodels.BaseEntity[models.CatalogMetricsArtifactAttributes]{
+				Attributes: &models.CatalogMetricsArtifactAttributes{
+					Name:        new("benchmark-2"),
+					MetricsType: models.MetricsTypePerformance,
+				},
+				Properties: &[]dbmodels.Properties{},
+				CustomProperties: &[]dbmodels.Properties{
+					dbmodels.NewDoubleProperty("requests_per_second", 300.0, true),
+					dbmodels.NewDoubleProperty("ttft_p90", 80.0, true),
+					dbmodels.NewIntProperty("hardware_count", 4, true),
+					dbmodels.NewStringProperty("hardware_type", "A100", true),
+				},
+			},
+		},
 	}
 	testArtifacts[0].CatalogMetricsArtifact.SetID(id1)
 	testArtifacts[1].CatalogMetricsArtifact.SetID(id2)
+	testArtifacts[2].CatalogMetricsArtifact.SetID(id3)
 
 	mockArtifactRepo.On("List", mock.AnythingOfType("models.CatalogArtifactListOptions")).
 		Return(&dbmodels.ListWrapper[sharedmodels.CatalogArtifact]{
@@ -845,7 +864,12 @@ func TestGetArtifacts_MixedBenchmarkAndColdStart(t *testing.T) {
 	result, err := service.GetArtifacts(params)
 
 	require.NoError(t, err, "should handle mixed artifact types without error")
-	require.Len(t, result.Items, 2, "both benchmark and cold-start artifacts should be returned")
+	require.Len(t, result.Items, 3, "all artifacts should be returned")
+
+	// Verify order matches repository order: benchmark-1, cold-start, benchmark-2
+	assert.Equal(t, id1, *result.Items[0].GetID())
+	assert.Equal(t, id2, *result.Items[1].GetID())
+	assert.Equal(t, id3, *result.Items[2].GetID())
 
 	// Benchmark artifact should have targetRPS calculations added
 	benchProps := result.Items[0].GetCustomProperties()
