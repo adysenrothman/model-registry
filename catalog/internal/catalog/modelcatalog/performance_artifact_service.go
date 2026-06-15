@@ -103,9 +103,14 @@ func (s *PerformanceArtifactService) GetArtifacts(params PerformanceArtifactPara
 	for _, artifact := range artifacts {
 		if s.isColdStartArtifact(artifact) {
 			result = append(result, artifact)
-		} else if id := artifact.GetID(); id != nil {
-			if _, kept := keptBenchmarks[*id]; kept {
-				result = append(result, keptBenchmarks[*id])
+		} else {
+			id := artifact.GetID()
+			if id == nil {
+				if !params.Recommendations {
+					result = append(result, artifact)
+				}
+			} else if processed, kept := keptBenchmarks[*id]; kept {
+				result = append(result, processed)
 			}
 		}
 	}
