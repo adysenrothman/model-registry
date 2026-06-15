@@ -1700,8 +1700,8 @@ func TestCreateColdStartArtifact(t *testing.T) {
 				t.Errorf("TypeID = %d, want %d", *artifact.TypeID, typeID)
 			}
 			attrs := artifact.GetAttributes()
-			if attrs.MetricsType != models.MetricsTypeColdStart {
-				t.Errorf("MetricsType = %q, want %q", attrs.MetricsType, models.MetricsTypeColdStart)
+			if attrs.MetricsType != models.MetricsTypePerformance {
+				t.Errorf("MetricsType = %q, want %q", attrs.MetricsType, models.MetricsTypePerformance)
 			}
 
 			// Verify naming
@@ -1740,6 +1740,9 @@ func TestCreateColdStartArtifact(t *testing.T) {
 				}
 			}
 
+			if stringPropMap["performance_sub_type"] != "cold-start" {
+				t.Errorf("performance_sub_type = %v, want %q", stringPropMap["performance_sub_type"], "cold-start")
+			}
 			if stringPropMap["gpu_type"] != tt.wantGPUType {
 				t.Errorf("gpu_type = %v, want %q", stringPropMap["gpu_type"], tt.wantGPUType)
 			}
@@ -1801,10 +1804,10 @@ func TestProcessModelArtifactsBatch_ColdStartOnly(t *testing.T) {
 		t.Fatalf("expected 2 saved artifacts, got %d", len(savedArtifacts))
 	}
 
-	// Verify both artifacts have cold-start metrics type
+	// Verify both artifacts have performance metrics type
 	for _, a := range savedArtifacts {
-		if a.GetAttributes().MetricsType != models.MetricsTypeColdStart {
-			t.Errorf("expected MetricsType %q, got %q", models.MetricsTypeColdStart, a.GetAttributes().MetricsType)
+		if a.GetAttributes().MetricsType != models.MetricsTypePerformance {
+			t.Errorf("expected MetricsType %q, got %q", models.MetricsTypePerformance, a.GetAttributes().MetricsType)
 		}
 	}
 }

@@ -21,11 +21,11 @@ import (
 // metadataJSON represents the minimal structure needed from metadata.json files
 // Only the ID field is needed to look up existing models
 type metadataJSON struct {
-	ID              string           `json:"id"`                // Maps to model name for lookup
-	OverallAccuracy *float64         `json:"overall_accuracy"`  // Overall accuracy score for the model
-	Size            *string          `json:"size"`              // Model parameter count (e.g., "8B params")
-	TensorType      *string          `json:"tensor_type"`       // Data precision (e.g., "FP16", "INT4")
-	VariantGroupID  *string          `json:"variant_group_id"`  // UUID linking model variants together
+	ID                     string           `json:"id"`                        // Maps to model name for lookup
+	OverallAccuracy        *float64         `json:"overall_accuracy"`          // Overall accuracy score for the model
+	Size                   *string          `json:"size"`                      // Model parameter count (e.g., "8B params")
+	TensorType             *string          `json:"tensor_type"`               // Data precision (e.g., "FP16", "INT4")
+	VariantGroupID         *string          `json:"variant_group_id"`          // UUID linking model variants together
 	MinVRAMGB              *float64         `json:"min_vram_gb"`               // Minimum VRAM required in GB (e.g., 466.0)
 	ModelcarImageSize      *float64         `json:"modelcar_image_size"`       // Modelcar image size in GB (e.g., 405.19)
 	ModelcarImageSizeBytes *int64           `json:"modelcar_image_size_bytes"` // Modelcar image size in bytes (e.g., 405186009411)
@@ -692,7 +692,9 @@ func createColdStartArtifact(entry coldStartEntry, externalID string, modelID in
 	now := time.Now().UnixMilli()
 
 	gpuCount := int32(entry.GPUCount)
+	subType := "cold-start"
 	customProperties := []models.Properties{
+		{Name: "performance_sub_type", StringValue: &subType},
 		{Name: "gpu_type", StringValue: &entry.GPUType},
 		{Name: "gpu_count", IntValue: &gpuCount},
 	}
@@ -721,7 +723,7 @@ func createColdStartArtifact(entry coldStartEntry, externalID string, modelID in
 			ExternalID:               &externalID,
 			CreateTimeSinceEpoch:     &now,
 			LastUpdateTimeSinceEpoch: &now,
-			MetricsType:              dbmodels.MetricsTypeColdStart,
+			MetricsType:              dbmodels.MetricsTypePerformance,
 		},
 		Properties:       &properties,
 		CustomProperties: &customProperties,

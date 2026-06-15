@@ -12,7 +12,6 @@ const (
 	MetricsTypePerformance     MetricsType = "performance-metrics"
 	MetricsTypeAccuracy        MetricsType = "accuracy-metrics"
 	MetricsTypeSecurityMetrics MetricsType = "security-metrics"
-	MetricsTypeColdStart       MetricsType = "cold-start-metrics"
 	CatalogMetricsArtifactType             = "metrics-artifact"
 )
 
