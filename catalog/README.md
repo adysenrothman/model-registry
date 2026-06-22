@@ -273,8 +273,8 @@ customProperties:
     metadataType: MetadataDoubleValue
     double_value: 405.19
   modelcar_image_size_bytes:
-    metadataType: MetadataIntValue
-    int_value: "405186009411"
+    metadataType: MetadataDoubleValue
+    double_value: 405186009411
 ```
 
 ##### Cold-Start and VRAM Metrics
