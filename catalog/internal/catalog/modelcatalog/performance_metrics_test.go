@@ -1301,7 +1301,7 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 				"size": "405B params",
 				"tensor_type": "FP8",
 				"min_vram_gb": 265.0,
-				"modelcar_image_size": 405.19,
+				"modelcar_image_size": 405.19
 			}`,
 			wantID:                "sample-model/test-405b-instruct",
 			wantSize:              &[]string{"405B params"}[0],
