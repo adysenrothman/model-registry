@@ -3,6 +3,8 @@ package repositories
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -961,18 +963,12 @@ func TestBuildK8sJobSkipsTrustedCAForInsecureRegistry(t *testing.T) {
 	}
 }
 
-func TestResolveAsyncUploadModelRegistryTrustCreatesGeneratedRouteBundleForFederatedRegistry(t *testing.T) {
-	client := &fakeKubernetesClient{
-		secretsByNamespace: map[string]map[string]*corev1.Secret{
-			asyncUploadOpenShiftRouterSecretNamespace: {
-				asyncUploadOpenShiftRouterSecretName: {
-					Data: map[string][]byte{
-						asyncUploadOpenShiftRouterSecretKey: []byte("router-ca-pem"),
-					},
-				},
-			},
-		},
+func TestResolveAsyncUploadModelRegistryTrustCreatesGeneratedBundleFromBundlePaths(t *testing.T) {
+	bundleFile := filepath.Join(t.TempDir(), "ca-bundle.crt")
+	if err := os.WriteFile(bundleFile, []byte("bundle-paths-pem"), 0o600); err != nil {
+		t.Fatalf("failed to write bundle file: %v", err)
 	}
+	client := &fakeKubernetesClient{}
 
 	trustMount, managedConfigMaps, err := resolveAsyncUploadModelRegistryTrust(
 		testContext(),
@@ -980,6 +976,7 @@ func TestResolveAsyncUploadModelRegistryTrustCreatesGeneratedRouteBundleForFeder
 		testNamespace,
 		"job-id",
 		true,
+		[]string{bundleFile},
 	)
 	if err != nil {
 		t.Fatalf("resolveAsyncUploadModelRegistryTrust returned error: %v", err)
@@ -1000,16 +997,16 @@ func TestResolveAsyncUploadModelRegistryTrustCreatesGeneratedRouteBundleForFeder
 	if createdConfigMap.Namespace != testNamespace {
 		t.Fatalf("expected created configmap namespace %q, got %q", testNamespace, createdConfigMap.Namespace)
 	}
-	if createdConfigMap.Data[asyncUploadTrustedCAFileName] != "router-ca-pem" {
+	if createdConfigMap.Data[asyncUploadTrustedCAFileName] != "bundle-paths-pem" {
 		t.Fatalf(
 			"expected trusted CA data %q, got %q",
-			"router-ca-pem",
+			"bundle-paths-pem",
 			createdConfigMap.Data[asyncUploadTrustedCAFileName],
 		)
 	}
 }
 
-func TestResolveAsyncUploadModelRegistryTrustFallsBackWhenRouteCAUnavailable(t *testing.T) {
+func TestResolveAsyncUploadModelRegistryTrustFallsBackWhenBundlePathsUnavailable(t *testing.T) {
 	client := &fakeKubernetesClient{}
 
 	trustMount, managedConfigMaps, err := resolveAsyncUploadModelRegistryTrust(
@@ -1018,6 +1015,7 @@ func TestResolveAsyncUploadModelRegistryTrustFallsBackWhenRouteCAUnavailable(t *
 		testNamespace,
 		"job-id",
 		true,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("resolveAsyncUploadModelRegistryTrust returned error: %v", err)
@@ -1097,16 +1095,11 @@ func TestResolveAsyncUploadDestinationRegistryTrustSkipsNonClusterServiceRegistr
 }
 
 func TestResolveAsyncUploadTrustReturnsPartialStateOnDestinationTrustError(t *testing.T) {
+	bundleFile := filepath.Join(t.TempDir(), "ca-bundle.crt")
+	if err := os.WriteFile(bundleFile, []byte("bundle-paths-pem"), 0o600); err != nil {
+		t.Fatalf("failed to write bundle file: %v", err)
+	}
 	client := &fakeKubernetesClient{
-		secretsByNamespace: map[string]map[string]*corev1.Secret{
-			asyncUploadOpenShiftRouterSecretNamespace: {
-				asyncUploadOpenShiftRouterSecretName: {
-					Data: map[string][]byte{
-						asyncUploadOpenShiftRouterSecretKey: []byte("router-ca-pem"),
-					},
-				},
-			},
-		},
 		configMapsByNamespace: map[string]map[string]*corev1.ConfigMap{
 			testNamespace: {
 				asyncUploadOpenShiftServiceCAConfigMap: {
@@ -1127,6 +1120,7 @@ func TestResolveAsyncUploadTrustReturnsPartialStateOnDestinationTrustError(t *te
 		true,
 		"https://example.apps.test/api/model_registry/v1alpha3",
 		"image-registry.openshift-image-registry.svc:5000",
+		[]string{bundleFile},
 	)
 	if err == nil {
 		t.Fatalf("expected resolveAsyncUploadTrust to return an error")

@@ -275,8 +275,8 @@ func convertK8sEventsToModelEvents(eventList *corev1.EventList) []models.ModelTr
 	return events
 }
 
-func (m *ModelRegistryRepository) CreateModelTransferJob(ctx context.Context, client k8s.KubernetesClientInterface, namespace string, payload models.ModelTransferJob, modelRegistryID string, isFederatedMode bool, podNamespace string) (*models.ModelTransferJob, error) {
-	return m.createModelTransferJobResources(ctx, client, namespace, payload, modelRegistryID, "", isFederatedMode, podNamespace)
+func (m *ModelRegistryRepository) CreateModelTransferJob(ctx context.Context, client k8s.KubernetesClientInterface, namespace string, payload models.ModelTransferJob, modelRegistryID string, isFederatedMode bool, podNamespace string, bundlePaths []string) (*models.ModelTransferJob, error) {
+	return m.createModelTransferJobResources(ctx, client, namespace, payload, modelRegistryID, "", isFederatedMode, podNamespace, bundlePaths)
 }
 
 func (m *ModelRegistryRepository) createModelTransferJobResources(
@@ -288,6 +288,7 @@ func (m *ModelRegistryRepository) createModelTransferJobResources(
 	existingDestSecretName string,
 	isFederatedMode bool,
 	podNamespace string,
+	bundlePaths []string,
 ) (*models.ModelTransferJob, error) {
 	payload.Source.Bucket = strings.TrimSpace(payload.Source.Bucket)
 	payload.Source.Key = strings.TrimSpace(payload.Source.Key)
@@ -355,6 +356,7 @@ func (m *ModelRegistryRepository) createModelTransferJobResources(
 		isFederatedMode,
 		modelRegistryAddress,
 		payload.Destination.Registry,
+		bundlePaths,
 	)
 	if err != nil {
 		cleanupCreatedResources(ctx, client, payload.Namespace, configMapName, sourceSecretName, destSecretName, trustConfig.managedConfigMaps...)
@@ -430,6 +432,7 @@ func (m *ModelRegistryRepository) UpdateModelTransferJob(
 	modelRegistryID string,
 	isFederatedMode bool,
 	podNamespace string,
+	bundlePaths []string,
 ) (*models.ModelTransferJob, error) {
 
 	logger := helper.GetContextLogger(ctx)
@@ -613,7 +616,7 @@ func (m *ModelRegistryRepository) UpdateModelTransferJob(
 		return nil, fmt.Errorf("validation error: %w", err)
 	}
 
-	result, err := m.createModelTransferJobResources(ctx, client, namespace, newPayload, modelRegistryID, existingDestSecretName, isFederatedMode, podNamespace)
+	result, err := m.createModelTransferJobResources(ctx, client, namespace, newPayload, modelRegistryID, existingDestSecretName, isFederatedMode, podNamespace, bundlePaths)
 	if err != nil {
 		if reuseDestCreds && existingDestSecretName != "" {
 			if delErr := client.DeleteSecret(ctx, newPayload.Namespace, existingDestSecretName); delErr != nil {

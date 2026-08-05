@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strings"
 
 	helper "github.com/kubeflow/hub/ui/bff/internal/helpers"
@@ -34,11 +35,6 @@ const (
 )
 
 const (
-	// Conservative platform defaults. Keep them isolated here so trust sources can be
-	// extended or overridden without changing the generic job builder plumbing.
-	asyncUploadOpenShiftRouterSecretNamespace = "openshift-ingress-operator"
-	asyncUploadOpenShiftRouterSecretName      = "router-ca"
-	asyncUploadOpenShiftRouterSecretKey       = "tls.crt"
 	asyncUploadOpenShiftServiceCAConfigMap    = "openshift-service-ca.crt"
 	asyncUploadOpenShiftServiceCAConfigMapKey = "service-ca.crt"
 	asyncUploadOpenShiftImageRegistryService  = "image-registry.openshift-image-registry.svc"
@@ -72,6 +68,7 @@ func resolveAsyncUploadTrust(
 	isFederatedMode bool,
 	modelRegistryAddress string,
 	destinationRegistry string,
+	bundlePaths []string,
 ) (asyncUploadResolvedTrust, error) {
 	trust := asyncUploadResolvedTrust{}
 
@@ -83,6 +80,7 @@ func resolveAsyncUploadTrust(
 			namespace,
 			jobID,
 			isFederatedMode,
+			bundlePaths,
 		)
 		if err != nil {
 			return trust, err
@@ -113,6 +111,7 @@ func resolveAsyncUploadModelRegistryTrust(
 	namespace string,
 	jobID string,
 	isFederatedMode bool,
+	bundlePaths []string,
 ) (*asyncUploadResolvedCAMount, []string, error) {
 	mount := &asyncUploadResolvedCAMount{
 		configMapName:       asyncUploadTrustedCAConfigMapName,
@@ -128,24 +127,14 @@ func resolveAsyncUploadModelRegistryTrust(
 	}
 
 	logger := helper.GetContextLogger(ctx)
-	routerCASecret, err := client.GetSecret(ctx, asyncUploadOpenShiftRouterSecretNamespace, asyncUploadOpenShiftRouterSecretName)
-	if err != nil {
+	// Federated mode: reuse the same CA material the BFF already trusts for outbound TLS
+	// (BUNDLE_PATHS / --bundle-paths). This avoids cross-namespace Secret reads that
+	// regular users cannot perform.
+	trustedCA := readLocalBundlePathsPEM(bundlePaths)
+	if trustedCA == "" {
 		logger.Warn(
-			"failed to read platform route CA, falling back to namespace CA bundle",
-			"namespace", asyncUploadOpenShiftRouterSecretNamespace,
-			"secret", asyncUploadOpenShiftRouterSecretName,
-			"error", err,
-		)
-		return mount, nil, nil
-	}
-
-	routerCABytes, found := routerCASecret.Data[asyncUploadOpenShiftRouterSecretKey]
-	if !found || strings.TrimSpace(string(routerCABytes)) == "" {
-		logger.Warn(
-			"platform route CA secret missing expected certificate data, falling back to namespace CA bundle",
-			"namespace", asyncUploadOpenShiftRouterSecretNamespace,
-			"secret", asyncUploadOpenShiftRouterSecretName,
-			"key", asyncUploadOpenShiftRouterSecretKey,
+			"no readable bundle-paths CA for federated registry, falling back to namespace CA bundle",
+			"fallbackConfigMap", asyncUploadTrustedCAConfigMapName,
 		)
 		return mount, nil, nil
 	}
@@ -155,7 +144,7 @@ func resolveAsyncUploadModelRegistryTrust(
 		namespace,
 		jobID,
 		asyncUploadTrustedCAFileName,
-		string(routerCABytes),
+		trustedCA,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to build model registry trusted CA configmap: %w", err)
@@ -170,12 +159,35 @@ func resolveAsyncUploadModelRegistryTrust(
 	}
 
 	logger.Info(
-		"created model registry trusted CA configmap for async upload job",
+		"created model registry trusted CA configmap for async upload job from bundle-paths",
 		"namespace", namespace,
 		"name", configMapCreated.Name,
 	)
 	mount.configMapName = configMapCreated.Name
 	return mount, []string{configMapCreated.Name}, nil
+}
+
+func readLocalBundlePathsPEM(bundlePaths []string) string {
+	var parts []string
+	for _, p := range bundlePaths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		pemBytes, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		trimmed := strings.TrimSpace(string(pemBytes))
+		if trimmed == "" {
+			continue
+		}
+		parts = append(parts, trimmed)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n")
 }
 
 func resolveAsyncUploadDestinationRegistryTrust(
