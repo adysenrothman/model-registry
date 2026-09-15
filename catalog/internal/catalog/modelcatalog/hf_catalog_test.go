@@ -2189,3 +2189,215 @@ func TestSetSourceCredentialStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldBlockGatedModel(t *testing.T) {
+	// Mock auth-check endpoint: 200 for granted models, 403 for denied.
+	grantedModels := map[string]bool{
+		"meta-llama/Llama-3-8B":        true,
+		"ibm-granite/granite-8b-code": true,
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/auth-check") {
+			modelID := strings.TrimPrefix(r.URL.Path, "/api/models/")
+			modelID = strings.TrimSuffix(modelID, "/auth-check")
+			if grantedModels[modelID] {
+				w.WriteHeader(http.StatusOK)
+			} else {
+				w.WriteHeader(http.StatusForbidden)
+			}
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	provider := &hfModelProvider{
+		sourceId: "test-source",
+		client:   &http.Client{},
+		baseURL:  server.URL,
+		apiKey:   "hf_test-key",
+	}
+
+	tests := []struct {
+		name              string
+		hfInfo            *hfModelInfo
+		shouldBlock       bool
+		description       string
+	}{
+		{
+			name: "public model should not be blocked",
+			hfInfo: &hfModelInfo{
+				ID:      "test-org/public-model",
+				Private: false,
+				Gated:   gatedString("false"),
+			},
+			shouldBlock: false,
+			description: "public models are always allowed",
+		},
+		{
+			name: "private model should not be blocked",
+			hfInfo: &hfModelInfo{
+				ID:      "test-org/private-model",
+				Private: true,
+				Gated:   gatedString("false"),
+			},
+			shouldBlock: false,
+			description: "private models are always allowed",
+		},
+		{
+			name: "gated_auto model with access granted should not be blocked",
+			hfInfo: &hfModelInfo{
+				ID:      "meta-llama/Llama-3-8B",
+				Private: false,
+				Gated:   gatedString("auto"),
+			},
+			shouldBlock: false,
+			description: "gated models with granted access are allowed",
+		},
+		{
+			name: "gated_manual model with access granted should not be blocked",
+			hfInfo: &hfModelInfo{
+				ID:      "ibm-granite/granite-8b-code",
+				Private: false,
+				Gated:   gatedString("manual"),
+			},
+			shouldBlock: false,
+			description: "gated models with granted access are allowed",
+		},
+		{
+			name: "gated_auto model without access should be blocked",
+			hfInfo: &hfModelInfo{
+				ID:      "org/gated-no-access-auto",
+				Private: false,
+				Gated:   gatedString("auto"),
+			},
+			shouldBlock: true,
+			description: "gated models without access are blocked",
+		},
+		{
+			name: "gated_manual model without access should be blocked",
+			hfInfo: &hfModelInfo{
+				ID:      "org/gated-no-access-manual",
+				Private: false,
+				Gated:   gatedString("manual"),
+			},
+			shouldBlock: true,
+			description: "gated models without access are blocked",
+		},
+		{
+			name: "gated boolean true without access should be blocked",
+			hfInfo: &hfModelInfo{
+				ID:      "org/gated-no-access-bool",
+				Private: false,
+				Gated:   gatedString("true"),
+			},
+			shouldBlock: true,
+			description: "gated models (legacy bool format) without access are blocked",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := provider.shouldBlockGatedModel(context.Background(), tt.hfInfo)
+			assert.Equal(t, tt.shouldBlock, result,
+				"shouldBlockGatedModel returned unexpected result: %s", tt.description)
+		})
+	}
+}
+
+// TestGetModelsFromHF_BlocksGatedWithoutAccess verifies that gated models
+// without access are blocked from loading into the catalog.
+func TestGetModelsFromHF_BlocksGatedWithoutAccess(t *testing.T) {
+	mux := http.NewServeMux()
+
+	// Track which endpoints were called
+	callCount := struct {
+		modelInfo  int
+		authCheck  int
+		listModels int
+	}{}
+
+	// Mock endpoints
+	mux.HandleFunc("/api/models/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/auth-check") {
+			callCount.authCheck++
+			// Only grant access to the "granted" model
+			if strings.Contains(r.URL.Path, "granted") {
+				w.WriteHeader(http.StatusOK)
+			} else {
+				w.WriteHeader(http.StatusForbidden)
+			}
+			return
+		}
+
+		callCount.modelInfo++
+
+		// Return model info based on what was requested
+		var gated gatedString
+		if strings.Contains(r.URL.Path, "gated") {
+			gated = gatedString("auto")
+		} else {
+			gated = gatedString("false")
+		}
+
+		modelID := strings.TrimPrefix(r.URL.Path, "/api/models/")
+		modelInfo := hfModelInfo{
+			ID:      modelID,
+			Private: false,
+			Gated:   gated,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(modelInfo) //nolint:errcheck
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	// Create provider with exact model patterns (no expansion needed)
+	source := &basecatalog.ModelSource{
+		CatalogSource: apimodels.CatalogSource{
+			Id:             "test-source",
+			IncludedModels: []string{
+				"org/public-model",
+				"org/gated-no-access",
+				"org/granted-with-access",
+			},
+		},
+	}
+
+	provider := &hfModelProvider{
+		sourceId:       "test-source",
+		client:         &http.Client{},
+		baseURL:        server.URL,
+		apiKey:         "hf_test-key",
+		includedModels: source.IncludedModels,
+		filter:         nil, // No filtering, all models should be considered
+	}
+
+	// Create a basic filter that allows all
+	provider.filter, _ = NewModelFilter(source.IncludedModels, nil)
+
+	ctx := context.Background()
+	records, err := provider.getModelsFromHF(ctx)
+
+	// Should not error
+	assert.NoError(t, err)
+
+	// Should only have 2 records (public + granted), gated without access should be blocked
+	assert.Equal(t, 2, len(records), "should have 2 models (public + granted), gated without access should be blocked")
+
+	// Verify the returned models are the expected ones
+	modelNames := make(map[string]bool)
+	for _, record := range records {
+		if record.Model != nil && record.Model.GetAttributes() != nil {
+			name := *record.Model.GetAttributes().Name
+			modelNames[name] = true
+		}
+	}
+
+	assert.True(t, modelNames["org/public-model"], "public model should be in results")
+	assert.True(t, modelNames["org/granted-with-access"], "granted model should be in results")
+	assert.False(t, modelNames["org/gated-no-access"], "gated model without access should NOT be in results")
+}

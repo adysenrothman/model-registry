@@ -574,6 +574,17 @@ func (p *hfModelProvider) getModelsFromHF(ctx context.Context) ([]ModelProviderR
 			continue
 		}
 
+		// Check if model is gated without access granted - block from loading
+		if p.shouldBlockGatedModel(ctx, modelInfo) {
+			accessType := deriveHFAccessType(modelInfo)
+			if p.apiKey == "" {
+				glog.Warningf("Blocking gated model %s (%s) from catalog: no API key configured. Set HF_API_KEY or HF_API_KEY_%s environment variable to enable access", modelName, accessType, envVarSuffix(p.sourceId))
+			} else {
+				glog.Warningf("Blocking gated model %s (%s) from catalog: access not granted. Please accept the license terms on https://huggingface.co/%s", modelName, accessType, modelName)
+			}
+			continue
+		}
+
 		record := p.convertHFModelToRecord(ctx, modelInfo, modelName)
 
 		// Additional safety check: verify the final model name is not excluded
@@ -656,12 +667,40 @@ func (p *hfModelProvider) fetchModelInfo(ctx context.Context, modelName string) 
 	return &modelInfo, nil
 }
 
+// shouldBlockGatedModel determines if a gated model should be blocked from
+// being loaded into the catalog. A gated model is blocked if:
+// - The model is gated (either gated_auto or gated_manual)
+// - AND the API key holder has not been granted access to it
+func (p *hfModelProvider) shouldBlockGatedModel(ctx context.Context, modelInfo *hfModelInfo) bool {
+	if modelInfo == nil {
+		return false
+	}
+	
+	accessType := deriveHFAccessType(modelInfo)
+	
+	// Only block if model is gated
+	if !strings.HasPrefix(accessType, "gated_") {
+		glog.V(3).Infof("Model %s is not gated (access_type=%s), will not block", modelInfo.ID, accessType)
+		return false
+	}
+	
+	// Check if access has been granted
+	hasAccess := p.checkGatedAccess(ctx, modelInfo.ID)
+	shouldBlock := !hasAccess
+	
+	glog.V(2).Infof("Model %s is gated (type=%s): hasAccess=%v, shouldBlock=%v", modelInfo.ID, accessType, hasAccess, shouldBlock)
+	
+	// Block if gated but no access
+	return shouldBlock
+}
+
 // checkGatedAccess checks whether the configured API key has been granted
 // access to a gated model by calling the HF auth-check endpoint.
 // Returns true when access is granted (HTTP 200), false otherwise (401/403).
 // When no API key is configured, returns false immediately.
 func (p *hfModelProvider) checkGatedAccess(ctx context.Context, modelName string) bool {
 	if p.apiKey == "" {
+		glog.V(2).Infof("No API key configured; cannot check gated access for %s", modelName)
 		return false
 	}
 
@@ -686,7 +725,9 @@ func (p *hfModelProvider) checkGatedAccess(ctx context.Context, modelName string
 	// Drain the body so the connection can be reused.
 	_, _ = io.ReadAll(resp.Body)
 
-	return resp.StatusCode == http.StatusOK
+	hasAccess := resp.StatusCode == http.StatusOK
+	glog.V(2).Infof("Auth-check for %s returned status %d (access=%v)", modelName, resp.StatusCode, hasAccess)
+	return hasAccess
 }
 
 // fetchFileContent fetches the content of a file from Hugging Face repository
@@ -1205,6 +1246,7 @@ func NewHFPreviewProvider(config *PreviewConfig) (*hfModelProvider, error) {
 		baseURL:      defaultHuggingFaceURL,
 		maxModels:    defaultMaxModels,
 		syncInterval: defaultSyncInterval,
+		sourceId:     "preview", // Mark this as preview mode for logging
 	}
 
 	// Reject custom URLs to prevent SSRF; the base URL is always the
