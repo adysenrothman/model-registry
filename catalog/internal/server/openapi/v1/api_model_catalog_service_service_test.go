@@ -2731,3 +2731,43 @@ models:
 		})
 	}
 }
+
+func TestHasGatedModels(t *testing.T) {
+	gatedAuto := "gated_auto"
+	gatedManual := "gated_manual"
+	public := "public"
+
+	tests := []struct {
+		name    string
+		results []model.ModelPreviewResult
+		want    bool
+	}{
+		{
+			name: "no gated models",
+			results: []model.ModelPreviewResult{
+				{Name: "public-model", Included: true, HfAccessType: &public},
+			},
+		},
+		{
+			name: "gated model outside current page",
+			results: []model.ModelPreviewResult{
+				{Name: "first-page-model", Included: true, HfAccessType: &public},
+				{Name: "later-page-model", Included: true, HfAccessType: &gatedAuto},
+			},
+			want: true,
+		},
+		{
+			name: "manually gated model",
+			results: []model.ModelPreviewResult{
+				{Name: "manual-gated-model", Included: true, HfAccessType: &gatedManual},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, hasGatedModels(tt.results))
+		})
+	}
+}
