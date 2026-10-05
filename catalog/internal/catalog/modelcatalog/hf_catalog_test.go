@@ -1840,6 +1840,50 @@ func TestNewHFModelProvider_SanitizesSecurityProperties(t *testing.T) {
 	assert.False(t, envVarExists, "apiKeyEnvVar property must be removed to prevent env var oracle")
 }
 
+func TestNewHFModelProvider_SavedCredentialUnavailable(t *testing.T) {
+	t.Setenv("HF_API_KEY_MY_SOURCE", "")
+	t.Setenv("HF_API_KEY", "hf_global_key")
+
+	source := &basecatalog.ModelSource{
+		CatalogSource: apimodels.CatalogSource{
+			Id:             "my_source",
+			IncludedModels: []string{"test-org/model-1"},
+		},
+		Properties: map[string]any{"apiKey": "catalog-my-source-apikey"},
+	}
+
+	ch, err := newHFModelProvider(context.Background(), source, "")
+	require.Error(t, err)
+	assert.Nil(t, ch)
+	assert.ErrorContains(t, err, "HF_API_KEY_MY_SOURCE is not set")
+	assert.NotContains(t, err.Error(), "catalog-my-source-apikey")
+	assert.False(t, source.GetHasApiKey())
+	authenticated, isSet := source.GetAuthenticatedOk()
+	assert.True(t, isSet)
+	assert.Nil(t, authenticated)
+}
+
+func TestNewHFModelProvider_SavedCredentialInvalid(t *testing.T) {
+	t.Setenv("HF_API_KEY_MY_SOURCE", "invalid-key")
+
+	source := &basecatalog.ModelSource{
+		CatalogSource: apimodels.CatalogSource{
+			Id:             "my_source",
+			IncludedModels: []string{"test-org/model-1"},
+		},
+		Properties: map[string]any{"apiKey": "catalog-my-source-apikey"},
+	}
+
+	ch, err := newHFModelProvider(context.Background(), source, "")
+	require.Error(t, err)
+	assert.Nil(t, ch)
+	assert.ErrorContains(t, err, "API key must start with 'hf_'")
+	assert.NotContains(t, err.Error(), "invalid-key")
+	assert.True(t, source.GetHasApiKey())
+	assert.True(t, source.HasAuthenticated())
+	assert.False(t, source.GetAuthenticated())
+}
+
 func TestEnvVarSuffix(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1903,6 +1947,40 @@ func TestResolveHFAPIKey(t *testing.T) {
 		t.Setenv("HF_API_KEY_MY_SOURCE", "")
 		t.Setenv("HF_API_KEY", "")
 		assert.Equal(t, "", resolveHFAPIKey("my-source", ""))
+	})
+}
+
+func TestResolveSavedHFAPIKey(t *testing.T) {
+	t.Run("reads the source-specific variable", func(t *testing.T) {
+		t.Setenv("HF_API_KEY_MY_SOURCE", "hf_source_key")
+		t.Setenv("HF_API_KEY", "hf_global_key")
+		key, envVar := resolveSavedHFAPIKey("my_source", "")
+		assert.Equal(t, "hf_source_key", key)
+		assert.Equal(t, "HF_API_KEY_MY_SOURCE", envVar)
+	})
+
+	t.Run("does not fall back to a global key", func(t *testing.T) {
+		t.Setenv("HF_API_KEY_MY_SOURCE", "")
+		t.Setenv("HF_API_KEY", "hf_global_key")
+		key, envVar := resolveSavedHFAPIKey("my_source", "")
+		assert.Empty(t, key)
+		assert.Equal(t, "HF_API_KEY_MY_SOURCE", envVar)
+	})
+
+	t.Run("uses an explicitly configured variable", func(t *testing.T) {
+		t.Setenv("HF_API_KEY_ORG1", "hf_org_key")
+		t.Setenv("HF_API_KEY_MY_SOURCE", "hf_source_key")
+		key, envVar := resolveSavedHFAPIKey("my_source", "HF_API_KEY_ORG1")
+		assert.Equal(t, "hf_org_key", key)
+		assert.Equal(t, "HF_API_KEY_ORG1", envVar)
+	})
+
+	t.Run("does not fall back when the configured variable is empty", func(t *testing.T) {
+		t.Setenv("HF_API_KEY_ORG1", "")
+		t.Setenv("HF_API_KEY_MY_SOURCE", "hf_source_key")
+		key, envVar := resolveSavedHFAPIKey("my_source", "HF_API_KEY_ORG1")
+		assert.Empty(t, key)
+		assert.Equal(t, "HF_API_KEY_ORG1", envVar)
 	})
 }
 

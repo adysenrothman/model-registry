@@ -1162,8 +1162,19 @@ func envVarSuffix(sourceID string) string {
 	return trimmed
 }
 
-// resolveHFAPIKey resolves the Hugging Face API key for the regular (non-preview)
-// provider from the environment. Precedence (first non-empty wins):
+// resolveSavedHFAPIKey reads the environment variable assigned to a source with
+// a saved credential reference. Such a source must not use another source's key
+// through the global fallback.
+func resolveSavedHFAPIKey(sourceID, propertyEnvVar string) (string, string) {
+	envVarName := propertyEnvVar
+	if envVarName == "" {
+		envVarName = apiKeyEnvVarPrefix + envVarSuffix(sourceID)
+	}
+	return os.Getenv(envVarName), envVarName
+}
+
+// resolveHFAPIKey resolves the Hugging Face API key for a source without a
+// saved credential reference. Precedence (first non-empty wins):
 //  1. The env var named by a validly-set apiKeyEnvVar property (propertyEnvVar).
 //  2. HF_API_KEY_<SOURCEID>, where <SOURCEID> is the source ID transformed by envVarSuffix.
 //  3. HF_API_KEY, the global fallback.
@@ -1193,9 +1204,21 @@ func newHFModelProvider(ctx context.Context, source *basecatalog.ModelSource, re
 	p.sourceId = sourceId
 
 	// Reject custom URLs (SSRF prevention) and validate apiKeyEnvVar (must be HF_API_KEY or HF_API_KEY_*).
-	// Resolve the API key with precedence: apiKeyEnvVar property > HF_API_KEY_<SOURCEID> > HF_API_KEY.
 	apiKeyEnvVar := sanitizeHFProperties(source.Properties, "HuggingFace catalog")
-	apiKey := resolveHFAPIKey(sourceId, apiKeyEnvVar)
+	savedCredential, _ := source.Properties["apiKey"].(string)
+	var apiKey string
+	if savedCredential != "" {
+		var expectedEnvVar string
+		apiKey, expectedEnvVar = resolveSavedHFAPIKey(sourceId, apiKeyEnvVar)
+		if apiKey == "" {
+			setSourceCredentialStatus(source, false, nil, "")
+			return nil, fmt.Errorf("saved Hugging Face credential for source %q is unavailable to the catalog service: %s is not set; check credential injection and restart the catalog rollout", sourceId, expectedEnvVar)
+		}
+	} else {
+		// Sources without a saved credential retain optional authentication and
+		// may use a source-specific or global environment variable.
+		apiKey = resolveHFAPIKey(sourceId, apiKeyEnvVar)
+	}
 	if apiKey == "" {
 		glog.Infof("No API key configured for Hugging Face. Only public models and limited data for gated models will be available.")
 	}
@@ -1227,6 +1250,10 @@ func newHFModelProvider(ctx context.Context, source *basecatalog.ModelSource, re
 	if p.apiKey != "" {
 		hasValidPrefix := strings.HasPrefix(p.apiKey, "hf_")
 		if !hasValidPrefix {
+			if savedCredential != "" {
+				setSourceCredentialStatus(source, true, boolPtr(false), "")
+				return nil, fmt.Errorf("saved Hugging Face credential for source %q is invalid: API key must start with 'hf_'", sourceId)
+			}
 			// API key is set but doesn't have expected prefix, warn and continue without authentication
 			glog.Infof("API key does not have expected 'hf_' prefix. Only public models and limited data for gated models will be available.")
 			p.apiKey = "" // Clear invalid key to prevent its use
