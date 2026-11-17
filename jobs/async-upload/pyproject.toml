@@ -17,6 +17,7 @@ requests = "^2.34.2"
 rh-model-signing = ">=1.0.1"
 pyasn1 = ">=0.6.5"
 botocore = ">=1.43.117"
+certifi = ">=2026.10.19"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.3.5,<10.0.0"
