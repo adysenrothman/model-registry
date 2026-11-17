@@ -12,6 +12,10 @@ configargparse = ">=1.7.1,<2.0.0"
 model-registry = { version = ">=0.3.7,<0.4.0", extras = ["boto3", "olot", "signing"] }
 botocore = ">=1.43.117"
 certifi = ">=2026.10.18"
+# CVE-2026-69247: PKCS#7 decryption must not expose an RSA padding oracle.
+cryptography = ">=50.0.0,<51.0.0"
+# Sigstore 4.4+ permits cryptography 50; 4.5.1 switches to the excluded uv_build backend.
+sigstore = ">=4.4.0,<4.5.1"
 pydantic = ">=2.0.0,<3.0.0"
 # hf-xet (Rust) is a mandatory dep from huggingface-hub 0.31+;
 # it breaks hermetic Cachi2 prefetch (cargo vendor on stale Cargo.lock).
